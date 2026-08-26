@@ -9,7 +9,8 @@
 
 | 工具 | 功能 |
 |------|------|
-| `screen_observe` | 看屏幕：AX 编号树 + 坐标（零视觉 token 成本）；AX 树为空自动降级视觉 |
+| `screen_observe` | 看屏幕：AX 编号树 + 坐标；支持三模：**native 原生直读**（截图直接进模型上下文）/ vision 视觉观察者 / ax 零成本树 |
+| `screen_zoom` | 区域截图直读：裁剪窗口某区域为 ≤500px JPEG 直接给模型看图（细节放大、省 token） |
 | `computer_click` / `computer_double_click` / `computer_right_click` | **真人操作**：独立光标滑行到目标 + 像素级真实点击（看得见过程） |
 | `computer_type` | 文本输入（密码框自动拒绝） |
 | `computer_key` | 按键 / 快捷键（return、cmd+c…；聊天窗口回车发送） |
@@ -18,7 +19,25 @@
 | `computer_wait` | 等待 |
 | `app_list` / `app_launch` | 列出 / 启动应用 |
 
-**核心设计**：AX 树只用于"看"（定位元素坐标），所有操作走**像素级虚拟光标**——光标滑行动画 + 真实点击，模拟真人操作。内置**彩虹渐变动态光标**主题（可自定义）。
+**核心设计**：AX 树只用于"看"（定位元素），操作走**像素级虚拟光标**——光标滑行动画 + 真实点击，模拟真人操作。内置**彩虹渐变动态光标**主题（可自定义）。
+
+### 👁 三种观察模式
+
+`screen_observe` 的 `mode` 参数选择看屏幕的方式：
+
+| mode | 原理 | 成本 | 适用 |
+|------|------|------|------|
+| `ax`（默认） | AX 界面树：编号 + 控件 + 坐标 | 零视觉 token | 绝大多数原生应用 |
+| `native` | 截图经 attachments 持久化后以**图片块**返回，**当前对话模型直接看图** | 图片 token | 主模型是视觉模型（如 `deepseek-v4-flash-vision-exp`）；游戏/Canvas/Electron 等无 AX 树的界面 |
+| `vision` | **DeepSeek 视觉观察者**（ctx.llm 调默认 `deepseek-v4-flash-vision-exp`）结构化描述截图，输出元素列表 | 一次额外模型调用 | 主模型非视觉模型但想看图；或无外部 key |
+
+- **原生接入**：`native` 模式走 harness 的 attachments + 图片内容块链路（与 `read_image` 同一机制），**零外部 API、零额外 key、无限流**，理解质量 = 当前对话模型。
+- **自动降级**：AX 树为空（游戏/Canvas/Electron 不可解析）时，自动按 `native → vision → ax` 降级，无需手动切换。
+- `vision` 模式观察者不可用时自动回退 GLM 免费模型（需 `ZHIPU_API_KEY`，仅作最后兜底）。
+
+### 🖱 坐标语义（v0.2.0 起，cua-driver 0.21+）
+
+所有坐标一律为**窗口本地截图像素**（与 `get_window_state` 返回的截图同一空间，左上原点）。模型所见即所点：`screen_observe` 输出的 `@(x,y)`、视觉识别坐标、`computer_click(x=,y=)` 全部同一空间，不再做 ×2 或窗口偏移换算（旧版固定 2.0 系数的近似校准已移除）。
 
 ## 🛡 安全设计
 
@@ -57,22 +76,37 @@
 ```yaml
 - id: dsh-computer-use
   config:
-    ttlMs: 15000        # 快照有效期（毫秒）
+    ttlMs: 30000        # 快照有效期（毫秒，多步 UI 操作建议 30-60s）
     maxElements: 500    # screen_observe 最大编号元素数
     allowedApps: []     # 区域限制白名单（空 = 不限制）
     cursorTheme: com.dsh.computeruse.rainbow  # 虚拟光标主题（空 = 引擎默认）
+    nativeImage: auto   # 原生直读截图策略：auto（PNG 超限额自动降级 ≤500px JPEG）/ full / compact
+    visionProvider: deepseek-official  # Mode D 观察者 provider 路由
+    visionModel: deepseek-v4-flash-vision-exp  # Mode D 观察者模型（需声明 image 输入）
 ```
 
-## 👁 视觉兜底（可选）
+## 📸 原生视觉模型接入（v0.2.0）
 
-游戏 / Canvas 等无 AX 树的界面，可启用视觉模式（默认不启用，零成本）：
+`mode="native"` / `mode="vision"` 无需任何外部 key —— 使用 **DeepSeek 原生视觉模型**：
 
-```bash
-# 智谱开放平台免费申请 key：https://open.bigmodel.cn
-export ZHIPU_API_KEY=你的key
-```
+1. **把 `deepseek-v4-flash-vision-exp` 注册进 harness**（v0.2.0 起已内置在 `llm-deepseek` 默认目录：`input: [text, image]`，Web 模型选择器直接可见可切换）。老版本 harness 可在 `settings.yaml` 的 `llm-pi-ai:` 下用 `modelOverrides` 声明：
 
-设置后 `screen_observe` 在 AX 树为空时自动降级为视觉理解（glm-4.6v-flash 免费模型，限流自动回退 glm-4v-flash / glm-4.1v-thinking-flash）；不设置则 AX 树正常返回、视觉部分给出提示，不影响主体功能。
+   ```yaml
+   llm-pi-ai:
+     providers:
+       deepseek:
+         apiKeyEnv: DEEPSEEK_API_KEY
+         models:
+           - id: deepseek-v4-flash
+           - id: deepseek-v4-flash-vision-exp
+             input: [text, image]
+   ```
+
+2. **Mode C 原生直读**：`screen_observe(mode="native")` → 截图以图片块进入对话，**当前对话模型直接看图**（把对话模型切到视觉模型即可，无需配置）。
+
+3. **Mode D 观察者**：`screen_observe(mode="vision")` → 插件经 `ctx.llm` 调 `visionModel`（默认 `deepseek-v4-flash-vision-exp`）结构化描述截图；观察者不可用时自动回退 GLM。
+
+> 截图经 harness `attachment-local` 持久化（默认单图 5MB/40M 像素；超限自动用引擎 `zoom` 降级为 ≤500px JPEG）。`screen_zoom` 工具提供区域截图直读（细节放大、省 token）。
 
 ## 🎨 光标主题（可选）
 
@@ -84,9 +118,9 @@ export ZHIPU_API_KEY=你的key
 ## ⚠️ 已知局限
 
 - **Windows / Linux 待真机实测**（引擎官方支持，指南见 `WINDOWS_TEST.md`）
-- **像素坐标校准为近似**（截图↔屏幕换算用固定比例，首次使用若点击偏移可用 `screen_observe` 视觉模式或引擎 `get_desktop_state` 截图对比校准）
-- **视觉读屏精度一般**（GLM 对小字体读数不稳，显示屏/细字场景建议配合 AX 或放大 zoom）
-- macOS 计算器等窗口显示屏不在 AX 树（需视觉读取）
+- **原生直读的图片 token 成本**：整窗截图（尤其 Retina）每次进上下文会消耗图片 token；需要高频轮询的场景建议 ax 模式 + `query` 过滤，或 `screen_zoom` 只看局部
+- **AX 安全检测仅对 element 编号模式生效**：坐标模式与无目标输入（`computer_type` / `computer_key` 落前台）由快照 TTL 与"操作可见"兜底（见上"安全设计"）
+- macOS 计算器等窗口显示屏不在 AX 树（用 `mode="native"` 直读即可）
 
 ## 🧪 开发与验证
 

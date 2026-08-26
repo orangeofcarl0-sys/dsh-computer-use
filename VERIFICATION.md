@@ -1,6 +1,6 @@
 # dsh-computer-use 验证报告（VERIFICATION）
 
-> 环境：macOS 15.6 (arm64) · harness-desktop（dsh 0.1.0-rc.6）· cua-driver 0.19.3
+> 环境：macOS 15.6 (arm64) · harness-desktop（dsh 0.1.1-rc.2）· cua-driver 0.19.3
 > 方法：隔离 profile（.dsh-p0）headless 实测，未改动真实 GUI 配置
 > 日期：2026-08-15
 
@@ -96,6 +96,40 @@
 
 ## 已知边界（非缺陷）
 
-- Safari 网页 DOM 不在 AX 树展开（引擎特性）→ 视觉兜底场景
+- Safari 网页 DOM 不在 AX 树展开（引擎特性）→ 视觉兜底场景（native / vision 模式）
 - 管理员权限窗口（UAC 等）Windows 上不可操作（引擎结构化拒绝）
 - Windows/Linux 平台待真机实测（官方支持矩阵：Windows Supported）
+
+## 📸 原生视觉模型接入（v0.2.0，2026-08-25 验证）
+
+### harness 侧（dsh-src，已通过类型检查 + 154 项单测）
+
+| 项 | 结果 |
+|---|---|
+| `llm-deepseek` 目录模型 `input` 字段 | `DeepSeekCatalogModel.input?: ['text'] \| ['text','image']`；`modelInfo()` 与 `resolveModel` 据此声明 `inputModalities` |
+| 注册 `deepseek-v4-flash-vision-exp` | `DEFAULT_MODELS` 新增该模型（input: [text, image]），Web 模型选择器直接可见 |
+| 图片块序列化 | `serialize.ts`：user 消息图片块 → OpenAI 兼容 `[{type:text},{type:image_url,url:data:...}]`（经 attachments 读回字节）；assistant/其他角色图片仍拒绝（UNSUPPORTED_CONTENT） |
+| 附件字节解析 | adapter 注入 `resolveImageBytes`（`ctx.attachments.readImage`），无 attachment 服务时副作用明确报错 |
+| 单测 | `serialize.spec` / `adapter.spec` / `dynamic-config.spec` 全部更新并通过（含图片块用例、3 模型默认目录断言）|
+
+### 插件侧（dsh-computer-use，真实引擎闭环 12/12 ✅）
+
+运行 `node verify-runtime.mjs`（隔离验证脚本，真实 cua-driver 0.21.0 daemon + 注入 attachments/llm 桩）：
+
+| 项 | 结果 |
+|---|---|
+| 工具注册 | 12 个（新增 `screen_zoom`），`screen_observe` mode enum = ax/vision/native |
+| `screen_observe(ax)` | 真实引擎：终端窗口树 + 坐标（截图像素标注）|
+| native 拒绝 | text-only route（deepseek-v4-flash）→ 优雅提示切视觉模型 |
+| **native 直读** | image-capable route（deepseek-v4-flash-vision-exp）→ 截图 PNG（1.06MB）经 attachments 落盘 + **render 产出 `{type:"image"}` 内容块（主模型直接看图）** |
+| `screen_zoom` | 真实引擎 zoom：区域 JPEG（≤500px）落盘 + 图片块 |
+| vision 降级链 | DeepSeek 观察者（无 key → MISSING_CREDENTIAL）→ GLM（无 key → 网络失败）→ 错误文本优雅返回，不崩溃 |
+| 坐标语义 | 0.21.0 "窗口本地截图像素" 统一：移除旧 ×2 / 窗口偏移换算；输出标注"坐标=窗口本地截图像素" |
+| 安全回归 | 无快照拒绝仍生效 |
+| 引擎拒绝透传 | `{code, effect:"refused"}` 结构化拒绝 → `ok:false`（不再误报成功）|
+
+### 说明
+
+- native 直读的"模型真正看到图"依赖 harness 运行时（附带的 app 内嵌 dsh 需含上述 harness 改动；用 dsh-src 源码构建的 dsh CLI 直接具备）
+- vision 观察者真实调用需 DEEPSEEK_API_KEY + 端点提供 `deepseek-v4-flash-vision-exp`
+- 截图超附件限额（5MB）时自动用引擎 `zoom` 降级 ≤500px JPEG（`nativeImage: auto/full/compact` 可调）

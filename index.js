@@ -2,7 +2,8 @@
  * dsh-computer-use —— Computer Use 插件：给 harness-desktop 增加"虚拟鼠标真人操作"。
  *
  * 工具集（Hermes 风格，模型友好）：
- *   screen_observe          看屏幕：AX 编号树 + 坐标（零视觉成本）
+ *   screen_observe          看屏幕：AX 编号树 + 坐标 / 原生直读 / 视觉观察者
+ *   screen_zoom             区域截图直读（≤500px JPEG，细节放大看）
  *   computer_click          点击（element 编号 或 x/y 坐标）
  *   computer_double_click   双击
  *   computer_right_click    右键
@@ -12,6 +13,14 @@
  *   computer_drag           拖拽
  *   computer_wait           等待 / 轮询间隔
  *   app_list                列出应用
+ *   app_launch              启动应用
+ *
+ * 视觉能力（原生接入）：
+ *   - mode="native"：截图经 attachments 持久化后以图片块返回，主对话模型
+ *     （如 deepseek-v4-flash-vision-exp）直接看图 —— 零外部 API、零额外 key。
+ *   - mode="vision"：DeepSeek 视觉观察者（ctx.llm）结构化描述截图（免 ZHIPU key），
+ *     不可用时回退 GLM 免费模型。
+ *   - ax：零成本 AX 树；AX 树为空时自动降级 native → vision → ax。
  *
  * 安全设计（P1 已内建，P3 深化）：
  *   - 观察快照 TTL：过期后拒绝动作，必须重新观察（element_token 引擎侧双重校验）
@@ -20,7 +29,7 @@
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
-import { screenObserve } from './lib/observe.js'
+import { screenObserve, screenZoom } from './lib/observe.js'
 import {
   click, doubleClick, rightClick, typeText, key, scroll, drag, wait, listApps, launchApp,
 } from './lib/actions.js'
@@ -34,13 +43,19 @@ export const inject = ['tools', 'approval']
 /** 插件配置。 */
 export const Config = z.object({
   /** 观察快照的有效期（毫秒）。 */
-  ttlMs: z.number().default(15000),
+  ttlMs: z.number().default(30000),
   /** screen_observe 最多返回多少编号元素。 */
   maxElements: z.number().default(500),
   /** 区域限制：允许操作的应用名白名单（空 = 不限制）。 */
   allowedApps: z.array(z.string()).default([]),
   /** 虚拟光标主题 id（空 = 不设置，用引擎默认）。 */
   cursorTheme: z.string().default('com.dsh.computeruse.rainbow'),
+  /** 原生直读截图策略：auto（PNG 超限额时自动降级 zoom JPEG）/ full（始终原图 PNG）/ compact（始终 ≤500px JPEG）。 */
+  nativeImage: z.union(['auto', 'full', 'compact']).default('auto'),
+  /** Mode D 观察者 provider 路由。 */
+  visionProvider: z.string().default('deepseek-official'),
+  /** Mode D 观察者模型（需声明 image 输入）。 */
+  visionModel: z.string().default('deepseek-v4-flash-vision-exp'),
 })
 
 /** 统一输出 schema：ok + result 文本。 */
@@ -57,7 +72,42 @@ const OUT = (extra = {}) => ({
   render: (_args, value) => [{ type: 'text', text: value.result }],
 })
 
-/** 统一的坐标/编号参数块。 */
+/** 图片块输出 schema 段（native 直读工具共用）。 */
+const IMAGE_FIELD = {
+  image: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      attachmentId: { type: 'string', required: true },
+      mediaType: { type: 'string', enum: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'], required: true },
+      bytes: { type: 'integer', required: true },
+      width: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+      height: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+      name: { type: 'string' },
+    },
+  },
+}
+
+/** render：值含 image 时追加图片块（主模型原生直读）。 */
+function renderWithImage(_args, value) {
+  if (!value.image) return [{ type: 'text', text: value.result }]
+  return [
+    { type: 'text', text: value.result },
+    {
+      type: 'image',
+      attachment: {
+        attachmentId: value.image.attachmentId,
+        mediaType: value.image.mediaType,
+        bytes: value.image.bytes,
+        width: value.image.width,
+        height: value.image.height,
+        ...value.image.name === undefined ? {} : { name: value.image.name },
+      },
+    },
+  ]
+}
+
+/** 统一的坐标/编号参数块（坐标 = 窗口本地截图像素）。 */
 const TARGET_PARAMS = {
   element: {
     type: 'integer',
@@ -65,11 +115,11 @@ const TARGET_PARAMS = {
   },
   x: {
     type: 'integer',
-    description: '窗口内像素 x 坐标（screen_observe 的快照窗口坐标系）。与 element 二选一。',
+    description: '窗口本地截图像素 x（screen_observe 的截图坐标系，模型所见即所点）。与 element 二选一。',
   },
   y: {
     type: 'integer',
-    description: '窗口内像素 y 坐标。',
+    description: '窗口本地截图像素 y。',
   },
 }
 
@@ -79,6 +129,9 @@ export function apply(ctx, config) {
     maxElements: config.maxElements,
     allowedApps: Array.isArray(config.allowedApps) ? config.allowedApps : [],
     cursorTheme: config.cursorTheme,
+    nativeImage: config.nativeImage || 'auto',
+    visionProvider: config.visionProvider || 'deepseek-official',
+    visionModel: config.visionModel || 'deepseek-v4-flash-vision-exp',
   }
 
   // 初始化虚拟光标：声明统一会话 + 应用主题（异步，不阻塞插件加载）
@@ -88,12 +141,12 @@ export function apply(ctx, config) {
       .catch(() => undefined)
   }
 
-  /** 统一包装：先过安全护栏，再执行实现。 */
+  /** 统一包装：先过安全护栏，再执行实现（exec 透传给需要 route 的实现）。 */
   const wrap = (toolName, impl) => async (args, exec) => {
     try {
       const g = await guard(ctx, cfg, toolName, args, exec)
       if (!g.ok) return { ok: false, result: `✗ ${g.reason}` }
-      return await impl(args, cfg)
+      return await impl(args, cfg, exec)
     } catch (err) {
       return { ok: false, result: `✗ ${err.message}` }
     }
@@ -102,11 +155,11 @@ export function apply(ctx, config) {
   ctx.tools.register(defineTool({
     name: 'screen_observe',
     description:
-      '观察屏幕：对目标窗口生成"编号 + 控件 + 中心坐标"的界面树（AX 语义，零视觉 token 成本）。' +
-      '操作电脑前必须先调用本工具取得快照；之后用 computer_click(element=[编号]) 或 computer_click(x=,y=) 操作。' +
-      '快照约 15 秒后过期，过期后需重新观察。' +
-      '窗口无法解析出 AX 树（游戏/Canvas）时：若设置了 ZHIPU_API_KEY 会自动降级为视觉模式（GLM-4V-Flash 免费），' +
-      '也可手动 mode="vision" 强制视觉理解。',
+      '观察屏幕：对目标窗口生成"编号 + 控件 + 坐标"的界面树（AX 语义，零视觉 token 成本）。' +
+      '操作电脑前必须先调用本工具取得快照；之后用 computer_click(element=[编号]) 或 computer_click(x=,y=) 操作（坐标为窗口本地截图像素）。' +
+      'mode 选择：ax（默认，零成本树）/ vision（DeepSeek 视觉观察者结构化描述，免 ZHIPU key）/ native（截图直读，当前对话模型直接看图，需模型支持图片输入）。' +
+      'AX 树无法解析（游戏/Canvas/Electron）时自动降级：native（若当前模型支持图片）→ vision → ax。' +
+      '快照默认 30 秒过期，过期后需重新观察。',
     parameters: {
       window: {
         type: 'string',
@@ -114,8 +167,8 @@ export function apply(ctx, config) {
       },
       mode: {
         type: 'string',
-        enum: ['ax', 'vision'],
-        description: 'ax（默认）= 零成本的界面树；vision = 额外抓取截图（游戏/Canvas 兜底）。',
+        enum: ['ax', 'vision', 'native'],
+        description: 'ax（默认）= 零成本的界面树；vision = 视觉观察者描述；native = 截图直读（模型直接看图）。',
       },
       query: {
         type: 'string',
@@ -126,7 +179,7 @@ export function apply(ctx, config) {
         description: '可选：最多返回多少个编号元素（防上下文爆炸）。',
       },
     },
-    output: OUT({
+    output: { ...OUT({
       window: { type: 'object', additionalProperties: false, properties: {
         pid: { type: 'integer' }, windowId: { type: 'integer' },
         app: { type: 'string' }, title: { type: 'string' },
@@ -147,16 +200,36 @@ export function apply(ctx, config) {
         },
       },
       screenshotFile: { oneOf: [{ type: 'string' }, { type: 'null' }] },
-    }),
-    execute: wrap('screen_observe', (args) => screenObserve(args, cfg)),
+      ...IMAGE_FIELD,
+    }), render: renderWithImage },
+    execute: wrap('screen_observe', (args, cfg2, exec) => screenObserve(ctx, args, cfg2, exec)),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'screen_zoom',
+    description:
+      '区域截图直读：裁剪窗口某块区域（截图像素坐标）为 ≤500px JPEG 并以图片返回，当前对话模型直接看图。' +
+      '用于"放大某块区域细看"（小字、图标、图表），图片 token 远小于整窗截图。' +
+      '坐标范围可用 screen_observe 的结果里的窗口截图尺寸（截图像素）估算；返回的图片即所见区域，' +
+      '之后 computer_click(x=,y=) 的坐标仍指整窗截图像素 —— 若需要点击 zoom 图内坐标，请先看参照。',
+    parameters: {
+      pid: { type: 'integer', description: '可选：目标窗口所属进程 pid（screen_observe 输出）；缺省按 window_id 解析。' },
+      window_id: { type: 'integer', required: true, description: '目标窗口 id（screen_observe 或 app_list 输出）。' },
+      x1: { type: 'integer', description: '可选：区域左边界（整窗截图像素），默认 0。' },
+      y1: { type: 'integer', description: '可选：区域上边界，默认 0。' },
+      x2: { type: 'integer', description: '可选：区域右边界，默认窗口截图宽。' },
+      y2: { type: 'integer', description: '可选：区域下边界，默认窗口截图高。' },
+    },
+    output: { ...OUT(IMAGE_FIELD), render: renderWithImage },
+    execute: wrap('screen_zoom', (args, cfg2, exec) => screenZoom(ctx, args, cfg2, exec)),
   }))
 
   ctx.tools.register(defineTool({
     name: 'computer_click',
-    description: '点击：传入 screen_observe 输出的元素编号（element），或窗口内坐标（x,y）。点击的是 cua-driver 的虚拟光标，不抢真实鼠标。',
+    description: '点击：传入 screen_observe 输出的元素编号（element），或窗口截图像素坐标（x,y）。点击的是 cua-driver 的虚拟光标，不抢真实鼠标。',
     parameters: { ...TARGET_PARAMS, count: { type: 'integer', description: '可选：点击次数，默认 1。' } },
     output: OUT(),
-    execute: wrap('computer_click', (args) => click(args, cfg)),
+    execute: wrap('computer_click', (args, cfg2) => click(args, cfg2)),
   }))
 
   ctx.tools.register(defineTool({
@@ -164,7 +237,7 @@ export function apply(ctx, config) {
     description: '双击：element 编号 或 x/y 坐标。',
     parameters: TARGET_PARAMS,
     output: OUT(),
-    execute: wrap('computer_double_click', (args) => doubleClick(args, cfg)),
+    execute: wrap('computer_double_click', (args, cfg2) => doubleClick(args, cfg2)),
   }))
 
   ctx.tools.register(defineTool({
@@ -172,7 +245,7 @@ export function apply(ctx, config) {
     description: '右键点击：element 编号 或 x/y 坐标。',
     parameters: TARGET_PARAMS,
     output: OUT(),
-    execute: wrap('computer_right_click', (args) => rightClick(args, cfg)),
+    execute: wrap('computer_right_click', (args, cfg2) => rightClick(args, cfg2)),
   }))
 
   ctx.tools.register(defineTool({
@@ -183,7 +256,7 @@ export function apply(ctx, config) {
       element: TARGET_PARAMS.element,
     },
     output: OUT(),
-    execute: wrap('computer_type', (args) => typeText(args, cfg)),
+    execute: wrap('computer_type', (args, cfg2) => typeText(args, cfg2)),
   }))
 
   ctx.tools.register(defineTool({
@@ -193,7 +266,7 @@ export function apply(ctx, config) {
       key: { type: 'string', required: true, description: '按键名或组合（示例: return / cmd+c / shift+tab / cmd+shift+p）。' },
     },
     output: OUT(),
-    execute: wrap('computer_key', (args) => key(args, cfg)),
+    execute: wrap('computer_key', (args, cfg2) => key(args, cfg2)),
   }))
 
   ctx.tools.register(defineTool({
@@ -205,21 +278,21 @@ export function apply(ctx, config) {
       element: TARGET_PARAMS.element,
     },
     output: OUT(),
-    execute: wrap('computer_scroll', (args) => scroll(args, cfg)),
+    execute: wrap('computer_scroll', (args, cfg2) => scroll(args, cfg2)),
   }))
 
   ctx.tools.register(defineTool({
     name: 'computer_drag',
-    description: '拖拽：在快照窗口内从 (from_x,from_y) 拖到 (to_x,to_y)。',
+    description: '拖拽：在快照窗口内从 (from_x,from_y) 拖到 (to_x,to_y)，坐标为窗口本地截图像素。',
     parameters: {
-      from_x: { type: 'integer', required: true, description: '起点 x（窗口像素）。' },
+      from_x: { type: 'integer', required: true, description: '起点 x（截图像素）。' },
       from_y: { type: 'integer', required: true, description: '起点 y。' },
       to_x: { type: 'integer', required: true, description: '终点 x。' },
       to_y: { type: 'integer', required: true, description: '终点 y。' },
       duration_ms: { type: 'integer', description: '可选：拖拽耗时毫秒，默认 500。' },
     },
     output: OUT(),
-    execute: wrap('computer_drag', (args) => drag(args, cfg)),
+    execute: wrap('computer_drag', (args, cfg2) => drag(args, cfg2)),
   }))
 
   ctx.tools.register(defineTool({
@@ -274,7 +347,7 @@ export function apply(ctx, config) {
     execute: wrap('app_launch', (args) => launchApp(args)),
   }))
 
-  ctx.logger?.info('dsh-computer-use: 11 个工具已注册（screen_observe / computer_click / double / right / type / key / scroll / drag / wait / app_list / app_launch）')
+  ctx.logger?.info('dsh-computer-use: 12 个工具已注册（screen_observe / screen_zoom / computer_click / double / right / type / key / scroll / drag / wait / app_list / app_launch）')
 }
 
 export default { name, inject, Config, apply }
