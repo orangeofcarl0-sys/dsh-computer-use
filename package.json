@@ -41,6 +41,7 @@
     "LICENSE",
     "PERMISSIONS.md",
     "docs/",
+    "assets/",
     "verify-runtime.mjs"
   ],
   "scripts": {
