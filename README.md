@@ -4,11 +4,11 @@
 >
 > **Give DeepSeek Harness a safe, observable Computer Use layer.** Observe desktop applications, locate UI elements, and act through an isolated virtual cursor.
 
-[![CI](https://github.com/988hj7tczd-oss/dsh-computer-use/actions/workflows/ci.yml/badge.svg)](https://github.com/988hj7tczd-oss/dsh-computer-use/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/dsh-computer-use)](https://www.npmjs.com/package/dsh-computer-use)
-[![npm downloads](https://img.shields.io/npm/dw/dsh-computer-use)](https://www.npmjs.com/package/dsh-computer-use)
-[![GitHub stars](https://img.shields.io/github/stars/988hj7tczd-oss/dsh-computer-use)](https://github.com/988hj7tczd-oss/dsh-computer-use)
-[![License](https://img.shields.io/github/license/988hj7tczd-oss/dsh-computer-use)](LICENSE)
+> **Provenance / 出处**：derived from [988hj7tczd-oss/dsh-computer-use](https://github.com/988hj7tczd-oss/dsh-computer-use)@`07477f4`（MIT）。本仓库为**独立维护的 Windows 深度实测分支**：安全模型（permissionMode）、投递策略（deliveryMode 三级链）与观测管线均已按自有路线演进，与上游不相互合并；问题请在本仓库提 issue。上游的原始问题反馈（#7/#8 已提回上游）继续在上游跟踪。
+>
+> **Provenance**: derived from [988hj7tczd-oss/dsh-computer-use](https://github.com/988hj7tczd-oss/dsh-computer-use)@`07477f4` (MIT), now maintained **independently** as a Windows-first hardening branch. The security model (permissionMode), delivery strategy (three-tier deliveryMode chain) and observation pipeline evolve on their own track; upstream is not merged back. File issues here. Upstream-facing bug reports (#7/#8) remain tracked upstream.
+
+[![License](https://img.shields.io/github/license/orangeofcarl0-sys/dsh-computer-use)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.18.0-339933)](https://nodejs.org/)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#platform-support--平台支持)
 
