@@ -52,8 +52,9 @@ const { guard } = await import(libUrl('guard.js'))
 const { setSnapshot } = await import(libUrl('snapshot.js'))
 const { screenObserve } = await import(libUrl('observe.js'))
 const { isActionableRole, isMaskedValue } = await import(libUrl('roles.js'))
+const { scanPasswords, markElementsFromScan } = await import(libUrl('passwordScan.js'))
 
-const cfg = { ttlMs: 60000, maxElements: 500, allowedApps: [], extremeRes: [], deliveryMode: 'auto' }
+const cfg = { ttlMs: 60000, maxElements: 500, allowedApps: [], extremeRes: [], passwordScan: 'off', deliveryMode: 'auto' }
 const cfgExtreme = { ...cfg, extremeRes: [/永久删除/] }
 
 let failures = 0
@@ -95,6 +96,30 @@ check('G3: 普通输入框放行（零误拒）', g.ok === true && !g.note)
 g = guard(cfg, 'computer_click', { element: 13 })
 check('G4: 非输入类命中 → 仅注记不硬拒', g.ok === true && /疑似密码相关/.test(g.note || ''))
 check('G5: 可交互角色跨平台（UIA Button / AXButton）', isActionableRole('Button') && isActionableRole('AXButton') && isActionableRole('AXSecureTextField'))
+
+// H. 结构性密码检测（v0.5.3 sidecar）：结构位 > 启发式，盲区补齐
+const fakeChild = (stdout, code = 0) => ({
+  stdout: { on: (ev, cb) => { if (ev === 'data' && stdout != null) setImmediate(() => cb(Buffer.from(stdout))) } },
+  stderr: { on: () => {} },
+  on: (ev, cb) => { if (ev === 'close') setImmediate(() => cb(code)) },
+  kill: () => {},
+})
+// 单元素解包形态（PS 5.1 ConvertTo-Json 实况）+ 探针实测坐标
+const scanJson = JSON.stringify({ window: { left: 40, top: 40, width: 630, height: 300 }, password: { name: '', x: 102, y: 227, w: 510, h: 32 } })
+let spawned = 0
+let s = await scanPasswords({ hwnd: 123, timeoutMs: 2000 }, () => { spawned++; return fakeChild(scanJson) })
+check('H1: sidecar 解析 + 单元素解包防御', s !== null && s.password.length === 1 && s.password[0].x === 102 && s.window.left === 40 && spawned === 1)
+const els = [{ frame: { x: 0, y: 0, w: 100, h: 30 } }, { frame: { x: 300, y: 190, w: 114, h: 30 } }]
+const marked = markElementsFromScan(els, s)
+check('H2: rect 包含标记（1 命中 1 不中）', marked === 1 && els[1].is_password === true && !els[0].is_password)
+setSnapshot({ at: Date.now(), ttlMs: cfg.ttlMs, pid: 1, windowId: 2, appName: 'A', snapshotId: 's1', entries: new Map([
+  [20, { token: 't20', role: 'Edit', label: '', value: '', is_password: true }],
+]) })
+g = guard(cfg, 'computer_type', { element: 20, text: 'x' })
+check('H3: 结构位 → 启发式盲区场景（无标签空值）硬拒', g.ok === false && /密码框拒绝自动输入/.test(g.reason || ''))
+s = await scanPasswords({ hwnd: 123, timeoutMs: 200 }, () => ({ stdout: { on: () => {} }, stderr: { on: () => {} }, on: () => {}, kill: () => {} }))
+check('H4: sidecar 超时 → null（启发式接管）', s === null)
+check('H5: 离线冒烟 cfg passwordScan=off（零 spawn）', cfg.passwordScan === 'off')
 
 // C. 极危注记（不阻断）
 setSnapshot({ at: Date.now(), ttlMs: cfg.ttlMs, pid: 1, windowId: 2, appName: 'A', snapshotId: 's1',

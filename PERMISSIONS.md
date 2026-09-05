@@ -5,6 +5,7 @@
 ## 总览（运行时行为）
 
 - 通过**宿主 `child_process.spawn` 以非 shell 固定 argv** 调用 `cua-driver` 原生驱动（跨平台：macOS / Windows / Linux），驱动本地桌面：
+- Windows 附加 spawn（0.5.3）：`powershell.exe` 固定 argv 执行随包脚本 `tools/uia-password-scan.ps1`——UIA 结构性密码扫描（IsPassword ∨ ES_PASSWORD 样式位），幂等只读、无网络、无文件写；`passwordScan: 'off'` 可关闭：
   - 屏幕观测：`screen_observe` / `screen_zoom`（读取被观测应用的 Accessibility/AX 树与窗口快照）
   - 虚拟鼠标键盘模拟：`computer_click` / `computer_double_click` / `computer_right_click` / `computer_type` / `computer_key` / `computer_scroll` / `computer_drag` / `computer_wait`
   - 应用枚举与启动：`app_list` / `app_launch`
@@ -19,7 +20,7 @@
 
 | 承诺 | Windows | macOS | Linux | 验证载体 |
 |---|---|---|---|---|
-| 凭据硬保护（密码框拒自动输入） | ✅ 启发式（0.5.2 起：文本输入类 × 密码词/掩码值；结构性判定待上游 `is_password` 投影，探针 A6） | ✅ AX 结构化角色 | unverified | posture.smoke G 系列 |
+| 凭据硬保护（密码框拒自动输入） | ✅ 结构位（0.5.3 起：UIA sidecar IsPassword ∨ ES_PASSWORD 实测标记；启发式为降级路径；结构性上游投影待 [#3576](https://github.com/trycua/cua/issues/3576)） | ✅ AX 结构化角色 | unverified | posture.smoke G/H 系列 + A6 探针 |
 | 极危注记（不阻断） | ✅ | ✅ | ✅ | posture.smoke |
 | allowedApps 作用域白名单 | ✅ | ✅ | ✅ | posture.smoke |
 | 快照 TTL / 无快照拒绝 | ✅ | ✅ | ✅ | posture.smoke / delivery-chain |
@@ -49,7 +50,7 @@
 | 信号 | 状态 | 说明 |
 |---|---|---|
 | 文件权限 | ⚠️ 命中 | `spawn` 子进程（cua-driver）是核心能力，属真实插件必备，提交人工审查 |
-| 命令权限 | ⚠️ 命中 | `spawn` 仅限固定 argv 调用 `cua-driver`，非 shell（`shell: false`），无 `exec` / `eval` |
+| 命令权限 | ⚠️ 命中 | `spawn` 仅限固定 argv：`cua-driver` 与随包 `tools/uia-password-scan.ps1`（Windows 结构性密码扫描，只读），非 shell（`shell: false`），无 `exec` / `eval` |
 | 网络权限 | ✅ 未命中 | 无任何网络调用 |
 | 凭据权限 | ⚠️ 轻微命中（可选） | GLM 视觉兜底读取 `ZHIPU_API_KEY` / `GLM_API_KEY` 环境变量（未配置即停用）；不读取任何密钥文件；`CUA_DRIVER_BIN` 仅用于定位可执行文件 |
 | 生命周期脚本 | ✅ 无 | npm 元数据中无 install/postinstall/prepare |

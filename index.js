@@ -63,6 +63,12 @@ export const Config = z.object({
    */
   extremePatterns: z.array(z.string()).default([]),
   /**
+   * 结构性密码扫描（Windows）：screen_observe 时经 UIA sidecar 读取元素 IsPassword/
+   * ES_PASSWORD 结构位并标记快照——凭据硬保护的结构性依据（启发式的盲区补齐）。
+   * auto 默认开启；off 关闭（零 spawn，凭据保护退回启发式）。macOS/Linux 不适用。
+   */
+  passwordScan: z.union(['auto', 'off']).default('auto'),
+  /**
    * 输入投递策略（前后台）：
    *   auto 默认：后台优先；命中 background_unavailable 时自动以前台重试
    *              （驱动短暂交换焦点后恢复原前台）并标注结果——不会"被阻拦"，
@@ -511,6 +517,7 @@ export function apply(ctx, config) {
     visionModel: config.visionModel || 'deepseek-v4-flash-vision-exp',
     extremeRes: (Array.isArray(config.extremePatterns) ? config.extremePatterns : [])
       .map((p) => new RegExp(p)),
+    passwordScan: config.passwordScan || 'auto',
     deliveryMode: config.deliveryMode || 'auto',
   }
 

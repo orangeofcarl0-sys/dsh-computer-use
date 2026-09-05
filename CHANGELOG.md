@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.3 (2026-09-06)
+
+**结构性密码检测（Windows）**——PLAN-credential-guard 第二期：凭据硬保护从启发式升级为读取系统真实属性（结构位），补齐"无标签 + 空值"密码框盲区。探针实证关键前提：经典 Win32 `ES_PASSWORD` 样式位在两种 UIA 客户端均映射 `IsPassword=false`，样式位才是系统真值（已作为 follow-up 反馈上游 [#3576](https://github.com/trycua/cua/issues/3576#issuecomment-5554919425)）。
+
+### Added
+
+- **UIA sidecar**（`tools/uia-password-scan.ps1` + `lib/passwordScan.js`）：`screen_observe` 时遍历目标窗口元素，密码 = `IsPassword`（现代框架 provider）∨ `ES_PASSWORD` 样式位（经典 Win32，`NativeWindowHandle` + `GetWindowLongW` 实测）→ 标记快照 entry → guard **结构位优先**硬拒。失败/超时（3s）自动降级启发式并在结果注记；误差方向安全（坐标错配只会漏标不会误标）。
+- `tools/password-probe.ps1` 自包含探针（A6）：WinForms 密码框 + UIA 自扫 + Win32 样式真值三重交叉验证；出货版 sidecar 已对活体探针窗口端到端命中（无标签空值密码框，count=1）。
+
+### Changed
+
+- Config 新增 `passwordScan: 'auto' | 'off'`（默认 auto；off = 零 spawn，凭据保护退回启发式）。权限面新增 powershell 固定 argv spawn（随包脚本、只读、无网络），PERMISSIONS/summary/命令清单如实更新；承诺矩阵 Windows 凭据行升级为「结构位」。
+
 ## 0.5.2 (2026-09-06)
 
 **Windows 凭据硬保护静默失效根治**（规格 PLAN-credential-guard；发现于 dsv4fv 定位实验真值交叉检查）。
