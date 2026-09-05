@@ -32,9 +32,9 @@ rm -rf "$DSH_HOME"
 |---|---|---|
 | 语法检查 | `npm run check`（node --check 全 JS + bash -n install/uninstall.sh） | 0 错误 |
 | 入口可加载 | `node -e "import('./index.js')"` | 成功（导出 name/inject/apply） |
-| 工具注册面 | grep index.js `defineTool` | **12 个工具**：screen_observe / screen_zoom / computer_click / computer_double_click / computer_right_click / computer_type / computer_key / computer_scroll / computer_drag / computer_wait / app_list / app_launch |
-| 安全护栏 | index.js `guard()` 统一包装 | 危险词审批、密码框保护、过期状态拒绝、作用域权限 |
-| 权限面 | `PERMISSIONS.md` | spawn cua-driver（非 shell 固定 argv）；无网络 / 凭据 / 文件读写 / 生命周期脚本 |
+| 工具注册面 | grep index.js `defineTool` | **19 个工具**：screen_observe / screen_zoom / computer_click / computer_double_click / computer_right_click / computer_type / computer_key / computer_scroll / computer_drag / computer_wait / computer_verify / computer_wait_for / computer_clipboard / computer_menu / computer_hover / computer_stop / computer_resume / app_list / app_launch |
+| 安全护栏 | index.js `guard()` 统一包装 | 凭据硬保护（密码框）、过期状态拒绝、作用域权限、极危注记（不阻断）、stop/resume 锁存闸门 |
+| 权限面 | `PERMISSIONS.md` | spawn cua-driver（非 shell 固定 argv）；无网络（GLM 兜底启用时经其官方 API 外呼）/ 无文件读写 / 生命周期脚本；env 仅 `CUA_DRIVER_BIN` + 可选 `ZHIPU_API_KEY`/`GLM_API_KEY` |
 | npm 包 | `npm pack` 内容核验 | files: index.js / lib/ / tools/ / cordis.patch.yml / README / VERIFICATION / PERMISSIONS.md / docs/ / LICENSE |
 
 ## 3. STORE 五信号响应行

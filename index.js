@@ -1,19 +1,11 @@
 /**
  * dsh-computer-use —— Computer Use 插件：给 harness-desktop 增加"虚拟鼠标真人操作"。
  *
- * 工具集（Hermes 风格，模型友好）：
- *   screen_observe          看屏幕：AX 编号树 + 坐标 / 原生直读 / 视觉观察者
- *   screen_zoom             区域截图直读（≤500px JPEG，细节放大看）
- *   computer_click          点击（element 编号 或 x/y 坐标）
- *   computer_double_click   双击
- *   computer_right_click    右键
- *   computer_type           文本输入
- *   computer_key            按键 / 快捷键
- *   computer_scroll         滚动
- *   computer_drag           拖拽
- *   computer_wait           等待 / 轮询间隔
- *   app_list                列出应用
- *   app_launch              启动应用
+ * 工具集（Hermes 风格，模型友好，共 19 个，按域分三组注册）：
+ *   观察组：screen_observe / screen_zoom
+ *   动作组：computer_click / double_click / right_click / type / key / scroll / drag / wait
+ *           app_list / app_launch
+ *   运营组：computer_verify / wait_for / clipboard / menu / hover / stop / resume
  *
  * 视觉能力（原生接入）：
  *   - mode="native"：截图经 attachments 持久化后以图片块返回，主对话模型
@@ -27,7 +19,8 @@
  *   - 自动提权：投递链自动升级（恢复原前台）、观测失败自动降级桌面级采集。
  *   - 极危敏感警告：extremePatterns 命中 → 注记警告，不阻断；凭据硬保护（密码框）是唯一硬拒绝。
  *   - 基本兜底：观察快照 TTL 过期拒绝（element_token 引擎侧双重校验）、
- *     动作一律要求先 screen_observe（无快照直接拒绝，杜绝盲操作）。
+ *     动作一律要求先 screen_observe（无快照直接拒绝，杜绝盲操作）、
+ *     computer_stop 强杀锁存（computer_resume 唯一解锁）。
  */
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -155,44 +148,37 @@ const TARGET_PARAMS = {
   },
 }
 
-export function apply(ctx, config) {
-  const cfg = {
-    ttlMs: config.ttlMs,
-    maxElements: config.maxElements,
-    allowedApps: Array.isArray(config.allowedApps) ? config.allowedApps : [],
-    cursorTheme: config.cursorTheme,
-    nativeImage: config.nativeImage || 'auto',
-    visionProvider: config.visionProvider || 'deepseek-official',
-    visionModel: config.visionModel || 'deepseek-v4-flash-vision-exp',
-    extremeRes: (Array.isArray(config.extremePatterns) ? config.extremePatterns : [])
-      .map((p) => new RegExp(p)),
-    deliveryMode: config.deliveryMode || 'auto',
-  }
+const VERIFY_RESULT = {
+  status: { type: 'string', description: 'satisfied / unsatisfied / unknown（unknown = 无法证明，不是失败也不是成功）' },
+  stable: { type: 'boolean' },
+  results: {
+    type: 'array',
+    items: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        index: { type: 'integer' },
+        status: { type: 'string' },
+        unknownReason: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+        expect: { type: 'string' },
+        observed: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      },
+    },
+  },
+}
 
-  // 初始化虚拟光标：声明统一会话 + 应用主题（异步，不阻塞插件加载）
-  cuaCall('start_session', { session: CUA_SESSION }).catch(() => undefined)
-  if (cfg.cursorTheme) {
-    cuaCall('set_agent_cursor_theme', { session: CUA_SESSION, theme_id: cfg.cursorTheme })
-      .catch(() => undefined)
-  }
+const VERIFY_PARAMS = {
+  pid: { type: 'integer', description: '目标进程 pid（screen_observe 输出）。' },
+  window_id: { type: 'integer', required: true, description: '目标窗口 id。' },
+  expect: {
+    type: 'string',
+    required: true,
+    description: '谓词数组 JSON（1-8 条，AND）。元素谓词：{"element":{"selector":{"role":"按钮","label_contains":"确定"},"exists":true,"enabled":true,"selected":null,"value_equals":null}}（exists 仅接受 true——absence 无法证明，缺失返回 unknown）；窗口谓词：{"window":{"exists":true,"bounds":{"x":0,"y":0,"width":100,"height":50,"tolerance_px":10}}}。',
+  },
+}
 
-  /** 强杀锁存状态（PLAN-tools-v0.5 §6-D2=B）：stop 后全工具拒绝，resume 唯一解锁。 */
-  const opsState = createOpsState()
-
-  /** 统一包装：锁存闸门 → 守卫（注记不阻断）→ 执行实现（exec 透传给需要 route 的实现）。 */
-  const wrap = (toolName, impl) => async (args, exec) => {
-    try {
-      const denied = opsGate(opsState, toolName)
-      if (denied) return { ok: false, result: `✗ ${denied}` }
-      const g = guard(cfg, toolName, args)
-      if (!g.ok) return { ok: false, result: `✗ ${g.reason}` }
-      const v = await impl(args, cfg, exec)
-      return g.note && v && typeof v.result === 'string' ? { ...v, result: `${v.result}${g.note}` } : v
-    } catch (err) {
-      return { ok: false, result: `✗ ${err.message}` }
-    }
-  }
-
+/** ── 观察组：screen_observe / screen_zoom ── */
+function registerObserveTools(ctx, cfg, wrap) {
   ctx.tools.register(defineTool({
     name: 'screen_observe',
     description:
@@ -293,7 +279,10 @@ export function apply(ctx, config) {
     }), render: renderWithImage },
     execute: wrap('screen_zoom', (args, cfg2, exec) => screenZoom(ctx, args, cfg2, exec)),
   }))
+}
 
+/** ── 动作组：computer_* + app_* ── */
+function registerActionTools(ctx, cfg, wrap) {
   ctx.tools.register(defineTool({
     name: 'computer_click',
     description: '点击：传入 screen_observe 输出的元素编号（element），或窗口截图像素坐标（x,y）。点击的是 cua-driver 的虚拟光标，不抢真实鼠标。默认后台投递（后台/最小化/隐藏窗口也可点，不抢焦点）；后台不可用时按 deliveryMode（默认 auto）自动升级投递并恢复原前台。',
@@ -420,37 +409,10 @@ export function apply(ctx, config) {
     output: OUT({ pid: { oneOf: [{ type: 'integer' }, { type: 'null' }] } }),
     execute: wrap('app_launch', (args) => launchApp(args)),
   }))
+}
 
-  // ── v0.5.0：确定性验证 / 轮询 / 剪贴板 / 菜单 / 悬停 / 强杀 ──
-
-  const VERIFY_RESULT = {
-    status: { type: 'string', description: 'satisfied / unsatisfied / unknown（unknown = 无法证明，不是失败也不是成功）' },
-    stable: { type: 'boolean' },
-    results: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          index: { type: 'integer' },
-          status: { type: 'string' },
-          unknownReason: { oneOf: [{ type: 'string' }, { type: 'null' }] },
-          expect: { type: 'string' },
-          observed: { oneOf: [{ type: 'string' }, { type: 'null' }] },
-        },
-      },
-    },
-  }
-  const VERIFY_PARAMS = {
-    pid: { type: 'integer', description: '目标进程 pid（screen_observe 输出）。' },
-    window_id: { type: 'integer', required: true, description: '目标窗口 id。' },
-    expect: {
-      type: 'string',
-      required: true,
-      description: '谓词数组 JSON（1-8 条，AND）。元素谓词：{"element":{"selector":{"role":"按钮","label_contains":"确定"},"exists":true,"enabled":true,"selected":null,"value_equals":null}}（exists 仅接受 true——absence 无法证明，缺失返回 unknown）；窗口谓词：{"window":{"exists":true,"bounds":{"x":0,"y":0,"width":100,"height":50,"tolerance_px":10}}}。',
-    },
-  }
-
+/** ── 运营组：确定性验证 / 轮询 / 剪贴板 / 菜单 / 悬停 / 强杀 ── */
+function registerOpsTools(ctx, cfg, wrap, opsState) {
   ctx.tools.register(defineTool({
     name: 'computer_verify',
     description:
@@ -536,8 +498,51 @@ export function apply(ctx, config) {
     output: OUT(),
     execute: wrap('computer_resume', () => opsResume(opsState)),
   }))
+}
 
-  ctx.logger?.info('dsh-computer-use: 19 个工具已注册（screen_observe / screen_zoom / computer_click / double / right / type / key / scroll / drag / wait / verify / wait_for / clipboard / menu / hover / stop / resume / app_list / app_launch）')
+export function apply(ctx, config) {
+  const cfg = {
+    ttlMs: config.ttlMs,
+    maxElements: config.maxElements,
+    allowedApps: Array.isArray(config.allowedApps) ? config.allowedApps : [],
+    cursorTheme: config.cursorTheme,
+    nativeImage: config.nativeImage || 'auto',
+    visionProvider: config.visionProvider || 'deepseek-official',
+    visionModel: config.visionModel || 'deepseek-v4-flash-vision-exp',
+    extremeRes: (Array.isArray(config.extremePatterns) ? config.extremePatterns : [])
+      .map((p) => new RegExp(p)),
+    deliveryMode: config.deliveryMode || 'auto',
+  }
+
+  // 初始化虚拟光标：声明统一会话 + 应用主题（异步，不阻塞插件加载）
+  cuaCall('start_session', { session: CUA_SESSION }).catch(() => undefined)
+  if (cfg.cursorTheme) {
+    cuaCall('set_agent_cursor_theme', { session: CUA_SESSION, theme_id: cfg.cursorTheme })
+      .catch(() => undefined)
+  }
+
+  /** 强杀锁存状态（PLAN-tools-v0.5 §6-D2=B）：stop 后全工具拒绝，resume 唯一解锁。 */
+  const opsState = createOpsState()
+
+  /** 统一包装：锁存闸门 → 守卫（注记不阻断）→ 执行实现（exec 透传给需要 route 的实现）。 */
+  const wrap = (toolName, impl) => async (args, exec) => {
+    try {
+      const denied = opsGate(opsState, toolName)
+      if (denied) return { ok: false, result: `✗ ${denied}` }
+      const g = guard(cfg, toolName, args)
+      if (!g.ok) return { ok: false, result: `✗ ${g.reason}` }
+      const v = await impl(args, cfg, exec)
+      return g.note && v && typeof v.result === 'string' ? { ...v, result: `${v.result}${g.note}` } : v
+    } catch (err) {
+      return { ok: false, result: `✗ ${err.message}` }
+    }
+  }
+
+  registerObserveTools(ctx, cfg, wrap)
+  registerActionTools(ctx, cfg, wrap)
+  registerOpsTools(ctx, cfg, wrap, opsState)
+
+  ctx.logger?.info('dsh-computer-use: 19 个工具已注册（观察组 screen_observe/zoom · 动作组 computer_click/double/right/type/key/scroll/drag/wait + app_list/launch · 运营组 verify/wait_for/clipboard/menu/hover/stop/resume）')
 }
 
 export default { name, inject, Config, apply }

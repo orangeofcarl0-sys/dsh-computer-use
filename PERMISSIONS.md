@@ -17,7 +17,8 @@
 
 - ❌ 不读取任何用户文件 / 项目文件（无 `fs` 读写）
 - ❌ 不发起任何网络请求（无 fetch / http / WebSocket）
-- ❌ 不访问凭据 / 环境变量中的敏感信息（仅读取 `CUA_DRIVER_BIN` 定位可执行文件）
+- ❌ 不访问用户 / 项目文件；不读取任何密钥**文件**（0.5.1 起移除家目录密钥文件扫描）
+- ⚠️ 环境变量读取：`ZHIPU_API_KEY` / `GLM_API_KEY`（仅 GLM 视觉兜底这一可选特性；未配置则该路径停用）+ `CUA_DRIVER_BIN`（定位可执行文件）
 - ❌ 不在宿主写入任何文件
 - ❌ 无 npm 生命周期脚本（install / postinstall 等一律没有；安装包内的 `install.sh` / `uninstall.sh` 是给用户手动执行的安装辅助脚本，非 npm lifecycle）
 - ❌ 不触碰真实鼠标键盘焦点（独立虚拟光标，隔离运行，不抢占用户输入）
@@ -36,7 +37,7 @@
 | 文件权限 | ⚠️ 命中 | `spawn` 子进程（cua-driver）是核心能力，属真实插件必备，提交人工审查 |
 | 命令权限 | ⚠️ 命中 | `spawn` 仅限固定 argv 调用 `cua-driver`，非 shell（`shell: false`），无 `exec` / `eval` |
 | 网络权限 | ✅ 未命中 | 无任何网络调用 |
-| 凭据权限 | ✅ 未命中 | 不触碰 `process.env` 中的密钥/凭证（仅 `CUA_DRIVER_BIN`） |
+| 凭据权限 | ⚠️ 轻微命中（可选） | GLM 视觉兜底读取 `ZHIPU_API_KEY` / `GLM_API_KEY` 环境变量（未配置即停用）；不读取任何密钥文件；`CUA_DRIVER_BIN` 仅用于定位可执行文件 |
 | 生命周期脚本 | ✅ 无 | npm 元数据中无 install/postinstall/prepare |
 
 完整安装/启动/卸载证据见 `docs/store-evidence.md`。

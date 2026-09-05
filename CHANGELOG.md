@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.1 (2026-09-06)
+
+结构与复杂度优化（纯结构重构，**零行为变化**——19 工具注册面经 parity 脚本逐字段验证一致）。
+
+### Changed
+
+- **index.js `apply()` 384 → 44 行**：19 个工具注册拆为模块级三组工厂 `registerObserveTools` / `registerActionTools` / `registerOpsTools`（apply 只剩配置装配 + 会话初始化 + wrap + 三次调用）。
+- **observe.js `screenObserve` 188 → 117 行**：抽出 `missingTreeFallback`（补抓判定）、`cacheSnapshot`（快照缓存）、`resolveObserveMode`（native/vision/ax 模式决策与降级链）三个纯函数。
+- **图片持久化收敛**：新增 `lib/attach.js saveImageAttachment` 统一出口，5 处 `attachments.saveImage` + 输出块装配调用点归一（尺寸回退语义逐点保留）。
+
+### Security
+
+- **权限面修正**：`vision.js loadKey` 移除家目录密钥文件扫描（`~/.zhipu-key` 等，上游继承的死代码），仅保留 `ZHIPU_API_KEY` / `GLM_API_KEY` 环境变量；PERMISSIONS.md / package.json / docs/store-evidence.md 如实声明（凭据信号从"未命中"改为"轻微命中（可选）"）。
+
 ## 0.5.0 (2026-09-06)
 
 工具改进包（规格 PLAN-tools-v0.5，拍板：D1 独立工具 / D2 锁存+resume / D3 hover 入包）。12 → **19 工具**。
