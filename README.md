@@ -48,7 +48,7 @@
 | 工具 | 作用 | 主要参数 |
 |---|---|---|
 | `screen_observe` | 观察窗口：编号树 / 截图直读 / 视觉描述 | `window`, `mode`, `query`, `maxElements` |
-| `screen_zoom` | 区域截图放大细看 | `window_id`, `pid`, `x1`, `y1`, `x2`, `y2` |
+| `screen_zoom` | 区域放大细看 / **树空目标定位原语** | `window_id`, `pid`, `x1`, `y1`, `x2`, `y2` |
 | `computer_click` | 点击元素或坐标 | `element` 或 `x,y`；可选 `count`、`foreground` |
 | `computer_double_click` | 双击 | 同上 |
 | `computer_right_click` | 右键 | 同上 |
@@ -100,6 +100,20 @@ Windows/Linux 先 `export DSH_HOME=/path/to/dsh-home`。或按 `docs/store-evide
 - 原点 = 目标窗口左上角；`screen_observe` 的 `@(x,y)` 与 `computer_click(x=,y=)` 同一空间；
 - 不乘 2、不加窗口偏移；
 - `screen_zoom` 返回局部图，但点击坐标仍指整窗截图空间。
+
+### 树空目标的定位环（zoom 定位原语）
+
+主模型的整窗裸定位误差大（实测 median>300px，且为先验驱动的布局重建而非像素测量），**像素路径一律走定位环**：
+
+```text
+screen_observe（AX 树失败/树空）
+  → screen_zoom(x1,y1,x2,y2)  # 取目标主导的小裁剪
+  → 本图内语义确认目标 + 读出图内坐标
+  → 图内坐标 × crop.scale + crop.x/y = 整窗截图像素
+  → computer_click(x=,y=)（必要时 AX/视觉复核命中）
+```
+
+`screen_zoom` 结果附 `crop` 元数据（原点/尺寸/换算比例）并给出换算公式。裁剪务必让目标占画面主导——实测目标主导小裁剪误差 13-80px。
 
 ## 前后台投递
 

@@ -258,9 +258,9 @@ export function apply(ctx, config) {
     name: 'screen_zoom',
     description:
       '区域截图直读：裁剪窗口某块区域（截图像素坐标）为 ≤500px JPEG 并以图片返回，当前对话模型直接看图。' +
-      '用于"放大某块区域细看"（小字、图标、图表），图片 token 远小于整窗截图。' +
-      '坐标范围可用 screen_observe 的结果里的窗口截图尺寸（截图像素）估算；返回的图片即所见区域，' +
-      '之后 computer_click(x=,y=) 的坐标仍指整窗截图像素 —— 若需要点击 zoom 图内坐标，请先看参照。',
+      '两种用法：①"放大某块区域细看"（小字、图标、图表），图片 token 远小于整窗截图；' +
+      '②定位原语（树空/像素目标推荐路径）：在本图内语义确认目标后，取"图内坐标 × crop.scale + crop.x/y"得到整窗截图像素坐标，再 computer_click(x=,y=)。' +
+      '实证依据：主模型整窗裸定位误差大（median>300px）不可依赖，目标主导的小裁剪定位误差 13-80px——裁剪务必让目标占画面主导。',
     parameters: {
       pid: { type: 'integer', description: '可选：目标窗口所属进程 pid（screen_observe 输出）；缺省按 window_id 解析。' },
       window_id: { type: 'integer', required: true, description: '目标窗口 id（screen_observe 或 app_list 输出）。' },
@@ -269,7 +269,19 @@ export function apply(ctx, config) {
       x2: { type: 'integer', description: '可选：区域右边界，默认窗口截图宽。' },
       y2: { type: 'integer', description: '可选：区域下边界，默认窗口截图高。' },
     },
-    output: { ...OUT(IMAGE_FIELD), render: renderWithImage },
+    output: { ...OUT({
+      crop: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          x: { type: 'integer' }, y: { type: 'integer' },
+          w: { type: 'integer' }, h: { type: 'integer' },
+          scale: { type: 'number', description: '整窗区域宽 / 返回图宽；图内坐标 × scale + crop.x/y = 整窗截图像素坐标' },
+        },
+        description: '本图对应的整窗区域与换算比例（定位原语）。',
+      },
+      ...IMAGE_FIELD,
+    }), render: renderWithImage },
     execute: wrap('screen_zoom', (args, cfg2, exec) => screenZoom(ctx, args, cfg2, exec)),
   }))
 

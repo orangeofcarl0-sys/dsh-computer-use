@@ -1,6 +1,6 @@
 {
   "name": "dsh-computer-use",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "DeepSeek Harness 的桌面操作插件（个人项目）：12 个模型友好工具，零审批自动提权，后台优先三级投递链，Windows 深度实测",
   "type": "module",
   "main": "index.js",

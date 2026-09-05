@@ -30,9 +30,14 @@ export const history = []
 export async function cuaCall(tool, args = {}) {
   history.push({ tool, args })
   if (tool === 'list_windows') return { windows: [{ pid: 1, window_id: 2, title: 'T', app_name: 'A', z_index: 1 }] }
-  if (tool === 'get_window_state') throw new Error('access denied (integrity level)')
+  if (tool === 'get_window_state') {
+    // screen_zoom 用 max_elements:1 取窗口尺寸（不降级）；其余路径恒失败以测观测降级
+    if (args.max_elements === 1) return { screenshot_width: 2560, screenshot_height: 1610, elements: [], element_count: 0, total_element_count: 0 }
+    throw new Error('access denied (integrity level)')
+  }
   if (tool === 'get_desktop_state') return { screenshot_width: 100, screenshot_height: 100 }
   if (tool === 'check_permissions') return { elevated: false, integrity_level: 'Medium', uia: true, post_message: false }
+  if (tool === 'zoom') return { screenshot_png_b64: 'aGVsbG8=', width: 50, height: 40, mime_type: 'image/jpeg' }
   return {}
 }
 export function isBackgroundUnavailable() { return false }
@@ -83,6 +88,19 @@ const ctxStub = { get: () => null }
 const r = await screenObserve(ctxStub, {}, cfg, null)
 check('D1: 观测失败自动降级桌面级采集', r.ok === true && r.mode === 'desktop-visual' && /观测降级/.test(r.result))
 check('D2: 降级结果标注 visualOnly + driverAccess', r.visualOnly === true && r.driverAccess !== undefined && r.driverAccess !== null)
+
+// F. 定位原语：screen_zoom 返回 crop 元数据（原点/尺寸/换算比例），支撑树空目标定位环
+const { screenZoom } = await import(libUrl('observe.js'))
+const fakeAtt = {
+  imageLimits: { maxImageBytes: 5 * 1024 * 1024 },
+  saveImage: async (o) => ({ attachmentId: 'a1', mediaType: o.mediaType, bytes: o.data.length, width: 50, height: 40, name: o.name }),
+}
+const fakeLlm = { resolveModelInfo: async () => ({ inputModalities: ['image', 'text'] }) }
+const ctxZoom = { get: (k) => (k === 'attachments' ? fakeAtt : k === 'llm' ? fakeLlm : null) }
+const execZoom = { agent: { options: { provider: 'p', model: 'm' } } }
+const z = await screenZoom(ctxZoom, { pid: 1, window_id: 2, x1: 100, y1: 200, x2: 200, y2: 280 }, cfg, execZoom)
+check('F1: zoom 返回 crop 元数据（原点+尺寸）', z.ok === true && z.crop?.x === 100 && z.crop?.y === 200 && z.crop?.w === 100 && z.crop?.h === 80)
+check('F2: crop.scale = 裁剪宽/返回图宽 = 2', z.crop?.scale === 2 && /定位环/.test(z.result || ''))
 
 // E. 姿态结构断言（源码级：无 permissionMode 残留、默认值翻转、无 approval 残留）
 const yml = readFileSync(join(root, 'cordis.patch.yml'), 'utf8')
