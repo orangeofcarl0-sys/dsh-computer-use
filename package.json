@@ -1,7 +1,7 @@
 {
   "name": "dsh-computer-use",
-  "version": "0.3.0",
-  "description": "Computer Use 插件：虚拟鼠标真人操作 + 原生视觉模型接入（deepseek-v4-flash-vision-exp 直读截图），screen_observe 等 12 个模型友好工具",
+  "version": "0.4.0",
+  "description": "DeepSeek Harness 的桌面操作插件（个人项目）：12 个模型友好工具，零审批自动提权，后台优先三级投递链，Windows 深度实测",
   "type": "module",
   "main": "index.js",
   "license": "MIT",
@@ -21,13 +21,13 @@
       "dsh": ">=0.1.0"
     },
     "permissions": {
-      "summary": "通过宿主 spawn 以非 shell 固定 argv 调用 cua-driver 原生驱动本地桌面：屏幕观测（screen_observe/screen_zoom，AX 树+窗口快照）、虚拟鼠标键盘模拟（computer_click/type/key/scroll/drag/wait）、应用枚举与启动（app_list/app_launch）。内置安全护栏：危险词审批、密码框保护、过期状态拒绝、作用域权限；虚拟光标不抢占真实鼠标。无文件读写、无网络、无凭据访问。",
+      "summary": "通过宿主 spawn 以非 shell 固定 argv 调用 cua-driver 原生驱动本地桌面：屏幕观测（screen_observe/screen_zoom，AX 树+窗口快照）、虚拟鼠标键盘模拟（computer_click/type/key/scroll/drag/wait）、应用枚举与启动（app_list/app_launch）。安全姿态（无感自治）：动作零审批零打断；凭据硬保护（密码框拒绝自动输入）为唯一硬拒绝；extremePatterns 命中仅附加警告注记不阻断；快照 TTL/无快照拒绝/作用域白名单兜底；虚拟光标不抢占真实鼠标。无文件读写、无网络、无凭据访问。",
       "commands": [
         "cua-driver (non-shell fixed argv, resolved via CUA_DRIVER_BIN or PATH)"
       ],
       "writePaths": [],
       "externalServices": "none",
-      "failureBoundaries": "cua-driver 缺失 → 结构化错误含自救指引；危险操作被审批拒绝 → 明确拒绝原因；观测快照过期 → 拒绝执行并提示重新观测；超时 → 超时错误",
+      "failureBoundaries": "cua-driver 缺失 → 结构化错误含自救指引；守卫拒绝（凭据保护/白名单/快照缺失或过期）→ 明确拒绝原因；引擎拒绝 → ok:false 结构化回执；超时 → 超时错误",
       "lifecycleEvidence": "docs/store-evidence.md"
     }
   },
@@ -53,7 +53,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/988hj7tczd-oss/dsh-computer-use.git"
+    "url": "git+https://github.com/orangeofcarl0-sys/dsh-computer-use.git"
   },
   "engines": {
     "node": ">=22.18.0"

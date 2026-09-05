@@ -9,11 +9,9 @@
   - 虚拟鼠标键盘模拟：`computer_click` / `computer_double_click` / `computer_right_click` / `computer_type` / `computer_key` / `computer_scroll` / `computer_drag` / `computer_wait`
   - 应用枚举与启动：`app_list` / `app_launch`
 - `cua-driver` 可执行文件来源：环境变量 `CUA_DRIVER_BIN` 显式指定，或 `PATH` 查找；缺失时返回结构化错误（含自救指引），不静默。
-- 内置安全护栏（所有工具统一走 `guard()` 包装）：**危险词审批**（敏感目标操作先请求用户确认）、**密码框保护**（检测到密码输入目标时拒绝）、**过期状态拒绝**（观测快照过期后拒绝执行）、**作用域权限**（仅授权应用/窗口内操作）。
-- 权限模式（配置项 `permissionMode`，默认 `standard`）只允许**放松插件自身护栏**，且不对齐任何真实 OS 权限边界：
-  - `full-access`：仅信息获取侧——观测失败降级桌面级采集（视觉仅读、不产生窗口级可执行坐标）、AX 树为空标注 `visualOnly`、附驱动权限面探测（`check_permissions`，只读）。动作侧护栏不变。
-  - `unrestricted`：额外放行危险词审批；密码框保护与 `allowedApps` 区域白名单仍生效。
-  - 本插件打开/放松护栏不等同于系统权限（Windows 管理员窗口边界、macOS TCC 授权仍由操作系统决定）。
+- 内置安全姿态（**无感自治**，0.4.0）：动作**零审批、零打断**（危险词审批网关已删除），归因靠全量投递注记 + harness 会话日志；**凭据硬保护**（密码框拒绝自动输入）是唯一硬拒绝；**极危注记**（`extremePatterns` 配置命中 → 结果附警告，不阻断，默认空）；**兜底护栏**：快照 TTL 过期拒绝、无快照拒绝、`allowedApps` 作用域白名单（默认空 = 关闭）。
+- 观测/投递能力默认全开（自动提权）：窗口级观测失败自动降级桌面级采集（视觉仅读、坐标系=桌面像素，不产生窗口级可执行坐标）；AX 树为空标注 `visualOnly`；结果附驱动权限面探测（`check_permissions`，只读）；投递链后台不可用时自动升级并恢复原前台。
+- 本插件不改变真实 OS 权限边界：Windows 管理员窗口边界、macOS TCC 授权仍由操作系统决定。
 
 ## 明确不做
 

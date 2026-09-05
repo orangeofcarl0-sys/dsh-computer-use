@@ -22,9 +22,12 @@
  *     不可用时回退 GLM 免费模型。
  *   - ax：零成本 AX 树；AX 树为空时自动降级 native → vision → ax。
  *
- * 安全设计（P1 已内建，P3 深化）：
- *   - 观察快照 TTL：过期后拒绝动作，必须重新观察（element_token 引擎侧双重校验）
- *   - 动作一律要求先 screen_observe（无快照直接拒绝，杜绝盲操作）
+ * 安全姿态（无感自治，0.4.0）：
+ *   - 易用无感：动作零审批、零打断；观测/投递能力默认全开。
+ *   - 自动提权：投递链自动升级（恢复原前台）、观测失败自动降级桌面级采集。
+ *   - 极危敏感警告：extremePatterns 命中 → 注记警告，不阻断；凭据硬保护（密码框）是唯一硬拒绝。
+ *   - 基本兜底：观察快照 TTL 过期拒绝（element_token 引擎侧双重校验）、
+ *     动作一律要求先 screen_observe（无快照直接拒绝，杜绝盲操作）。
  */
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -38,12 +41,12 @@ import { cuaCall, CUA_SESSION } from './lib/cua.js'
 
 export const name = 'dsh-computer-use'
 
-export const inject = ['tools', 'approval']
+export const inject = ['tools']
 
 /** 插件配置。 */
 export const Config = z.object({
   /** 观察快照的有效期（毫秒）。 */
-  ttlMs: z.number().default(30000),
+  ttlMs: z.number().default(60000),
   /** screen_observe 最多返回多少编号元素。 */
   maxElements: z.number().default(500),
   /** 区域限制：允许操作的应用名白名单（空 = 不限制）。 */
@@ -57,27 +60,22 @@ export const Config = z.object({
   /** Mode D 观察者模型（需声明 image 输入）。 */
   visionModel: z.string().default('deepseek-v4-flash-vision-exp'),
   /**
-   * 权限模式：
-   *   standard    默认：所有护栏原样（快照 TTL / 无快照拒绝 / 危险词审批 / 密码框保护）。
-   *   full-access 信息获取全权限：窗口级观测失败时自动降级为桌面级采集（视觉仅读，
-   *               坐标系变为桌面像素，明确不可直接用于动作）；AX 树为空时标注
-   *               visualOnly 而非硬失败；观测结果附驱动权限面（check_permissions）。
-   *               动作侧一切护栏不变。
-   *   unrestricted 在 full-access 基础上，危险词命中时自动放行（不再向用户征询）；
-   *               密码框保护与区域白名单仍然生效。
+   * 极危清单（注记警告，不阻断）：正则源字符串数组，命中元素标签时在结果附加
+   * 极危警告注记。默认空 = 零差异；按需增补（如 '永久删除|格式化|清空回收站'）。
+   * 凭据硬保护（密码框拒绝自动输入）独立于本清单，始终生效。
    */
-  permissionMode: z.union(['standard', 'full-access', 'unrestricted']).default('standard'),
+  extremePatterns: z.array(z.string()).default([]),
   /**
    * 输入投递策略（前后台）：
-   *   background 默认：全程后台投递（UIA Invoke / PostMessage，不抢用户焦点）；
-   *               后台不可用时返回结构化错误并给出 foreground=true 升级指引。
-   *   auto       后台优先；命中 background_unavailable 时自动以前台重试一次
-   *               （驱动短暂交换焦点后恢复原前台）并标注结果——不会"被阻拦"，
-   *               也不会"被忽视"（后台静默 no-op 的目标由驱动判定）。
+   *   auto 默认：后台优先；命中 background_unavailable 时自动以前台重试
+   *              （驱动短暂交换焦点后恢复原前台）并标注结果——不会"被阻拦"，
+   *              也不会"被忽视"（后台静默 no-op 的目标由驱动判定）。
+   *   background 全程后台投递（UIA Invoke / PostMessage，不抢用户焦点）；
+   *              后台不可用时返回结构化错误并给出 foreground=true 升级指引。
    *   foreground 始终前台投递（短暂焦点交换）。
    * 工具级 foreground=true 可对单次动作强制前台。
    */
-  deliveryMode: z.union(['background', 'auto', 'foreground']).default('background'),
+  deliveryMode: z.union(['background', 'auto', 'foreground']).default('auto'),
 })
 
 /** 统一输出 schema：ok + result 文本。 */
@@ -162,8 +160,9 @@ export function apply(ctx, config) {
     nativeImage: config.nativeImage || 'auto',
     visionProvider: config.visionProvider || 'deepseek-official',
     visionModel: config.visionModel || 'deepseek-v4-flash-vision-exp',
-    permissionMode: config.permissionMode || 'standard',
-    deliveryMode: config.deliveryMode || 'background',
+    extremeRes: (Array.isArray(config.extremePatterns) ? config.extremePatterns : [])
+      .map((p) => new RegExp(p)),
+    deliveryMode: config.deliveryMode || 'auto',
   }
 
   // 初始化虚拟光标：声明统一会话 + 应用主题（异步，不阻塞插件加载）
@@ -173,12 +172,13 @@ export function apply(ctx, config) {
       .catch(() => undefined)
   }
 
-  /** 统一包装：先过安全护栏，再执行实现（exec 透传给需要 route 的实现）。 */
+  /** 统一包装：先过守卫（注记不阻断），再执行实现（exec 透传给需要 route 的实现）。 */
   const wrap = (toolName, impl) => async (args, exec) => {
     try {
-      const g = await guard(ctx, cfg, toolName, args, exec)
+      const g = guard(cfg, toolName, args)
       if (!g.ok) return { ok: false, result: `✗ ${g.reason}` }
-      return await impl(args, cfg, exec)
+      const v = await impl(args, cfg, exec)
+      return g.note && v && typeof v.result === 'string' ? { ...v, result: `${v.result}${g.note}` } : v
     } catch (err) {
       return { ok: false, result: `✗ ${err.message}` }
     }
@@ -191,7 +191,7 @@ export function apply(ctx, config) {
       '操作电脑前必须先调用本工具取得快照；之后用 computer_click(element=[编号]) 或 computer_click(x=,y=) 操作（坐标为窗口本地截图像素）。' +
       'mode 选择：ax（默认，零成本树）/ vision（DeepSeek 视觉观察者结构化描述，免 ZHIPU key）/ native（截图直读，当前对话模型直接看图，需模型支持图片输入）。' +
       'AX 树无法解析（游戏/Canvas/Electron）时自动降级：native（若当前模型支持图片）→ vision → ax。' +
-      '快照默认 30 秒过期，过期后需重新观察。',
+      '快照默认 60 秒过期，过期后需重新观察。',
     parameters: {
       window: {
         type: 'string',
@@ -247,7 +247,7 @@ export function apply(ctx, config) {
           },
           { type: 'null' },
         ],
-        description: '权限模式 full-access/unrestricted 下附带；来源 cua-driver check_permissions。',
+        description: '附驱动权限面（cua-driver check_permissions 只读探测；探测失败为 null）。',
       },
       ...IMAGE_FIELD,
     }), render: renderWithImage },
@@ -275,7 +275,7 @@ export function apply(ctx, config) {
 
   ctx.tools.register(defineTool({
     name: 'computer_click',
-    description: '点击：传入 screen_observe 输出的元素编号（element），或窗口截图像素坐标（x,y）。点击的是 cua-driver 的虚拟光标，不抢真实鼠标。默认后台投递（后台/最小化/隐藏窗口也可点，不抢焦点）；命中后台不可用错误时按提示加 foreground=true 重试。',
+    description: '点击：传入 screen_observe 输出的元素编号（element），或窗口截图像素坐标（x,y）。点击的是 cua-driver 的虚拟光标，不抢真实鼠标。默认后台投递（后台/最小化/隐藏窗口也可点，不抢焦点）；后台不可用时按 deliveryMode（默认 auto）自动升级投递并恢复原前台。',
     parameters: { ...TARGET_PARAMS, ...FOREGROUND_PARAM, count: { type: 'integer', description: '可选：点击次数，默认 1。' } },
     output: OUT(),
     execute: wrap('computer_click', (args, cfg2) => click(args, cfg2)),
