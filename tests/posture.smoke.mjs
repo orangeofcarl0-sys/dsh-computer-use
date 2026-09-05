@@ -51,6 +51,7 @@ const libUrl = (name) => pathToFileURL(join(work, 'lib', name)).href
 const { guard } = await import(libUrl('guard.js'))
 const { setSnapshot } = await import(libUrl('snapshot.js'))
 const { screenObserve } = await import(libUrl('observe.js'))
+const { isActionableRole, isMaskedValue } = await import(libUrl('roles.js'))
 
 const cfg = { ttlMs: 60000, maxElements: 500, allowedApps: [], extremeRes: [], deliveryMode: 'auto' }
 const cfgExtreme = { ...cfg, extremeRes: [/永久删除/] }
@@ -76,6 +77,24 @@ g = guard(cfg, 'computer_type', { element: 2, text: 'secret' })
 check('B1: 密码框自动输入硬拒绝', g.ok === false && /密码框拒绝自动输入/.test(g.reason || ''))
 g = guard(cfg, 'computer_click', { element: 2 })
 check('B2: 密码框点击放行 + 凭据注记', g.ok === true && /凭据保护注记/.test(g.note || ''))
+
+// G. 跨平台凭据硬保护（Windows UIA 命名 + 掩码值，0.5.2）：修复前 Windows 上保护静默失效
+const winEntries = new Map([
+  [10, { token: 't10', role: 'Edit', label: '密码', value: '' }],
+  [11, { token: 't11', role: 'Edit', label: '账号', value: '●●●●●●' }],
+  [12, { token: 't12', role: 'Edit', label: '用户名', value: '' }],
+  [13, { token: 't13', role: 'Button', label: '显示密码', value: '' }],
+])
+setSnapshot({ at: Date.now(), ttlMs: cfg.ttlMs, pid: 1, windowId: 2, appName: 'A', snapshotId: 's1', entries: winEntries })
+g = guard(cfg, 'computer_type', { element: 10, text: 'x' })
+check('G1: Windows 形态硬拒（Edit × 密码词）', g.ok === false && /密码框拒绝自动输入/.test(g.reason || ''))
+g = guard(cfg, 'computer_type', { element: 11, text: 'x' })
+check('G2: 掩码值硬拒（Edit × ●●●●）', g.ok === false && isMaskedValue('●●●●●●'))
+g = guard(cfg, 'computer_type', { element: 12, text: 'x' })
+check('G3: 普通输入框放行（零误拒）', g.ok === true && !g.note)
+g = guard(cfg, 'computer_click', { element: 13 })
+check('G4: 非输入类命中 → 仅注记不硬拒', g.ok === true && /疑似密码相关/.test(g.note || ''))
+check('G5: 可交互角色跨平台（UIA Button / AXButton）', isActionableRole('Button') && isActionableRole('AXButton') && isActionableRole('AXSecureTextField'))
 
 // C. 极危注记（不阻断）
 setSnapshot({ at: Date.now(), ttlMs: cfg.ttlMs, pid: 1, windowId: 2, appName: 'A', snapshotId: 's1',

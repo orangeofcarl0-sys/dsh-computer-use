@@ -13,6 +13,20 @@
 - 观测/投递能力默认全开（自动提权）：窗口级观测失败自动降级桌面级采集（视觉仅读、坐标系=桌面像素，不产生窗口级可执行坐标）；AX 树为空标注 `visualOnly`；结果附驱动权限面探测（`check_permissions`，只读）；投递链后台不可用时自动升级并恢复原前台。
 - 本插件不改变真实 OS 权限边界：Windows 管理员窗口边界、macOS TCC 授权仍由操作系统决定。
 
+## 承诺验证矩阵（承诺 × 平台 × 载体）
+
+> 安全承诺必须按平台实测，"代码看起来对"不算数。✅ = 已验证；▒ = 离线覆盖、无运行时实测；unverified = 无环境。变更任何承诺必须同步更新本表并固化验证载体（smoke 或探针）。
+
+| 承诺 | Windows | macOS | Linux | 验证载体 |
+|---|---|---|---|---|
+| 凭据硬保护（密码框拒自动输入） | ✅ 启发式（0.5.2 起：文本输入类 × 密码词/掩码值；结构性判定待上游 `is_password` 投影，探针 A6） | ✅ AX 结构化角色 | unverified | posture.smoke G 系列 |
+| 极危注记（不阻断） | ✅ | ✅ | ✅ | posture.smoke |
+| allowedApps 作用域白名单 | ✅ | ✅ | ✅ | posture.smoke |
+| 快照 TTL / 无快照拒绝 | ✅ | ✅ | ✅ | posture.smoke / delivery-chain |
+| 三级投递链 + 恢复原前台 | ✅ 实测 | ▒ | ▒ | delivery-chain.smoke |
+| 强杀锁存（stop/resume） | ✅ 离线 | ▒ | ▒ | tools.smoke |
+| 验证 unknown ≠ 成功 | ✅ | ▒ | ▒ | tools.smoke |
+
 ## 明确不做
 
 - ❌ 不读取任何用户文件 / 项目文件（无 `fs` 读写）

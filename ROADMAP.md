@@ -11,6 +11,7 @@
 | A3 | qwen3-vl 坐标帧错位根因（代理缩图 vs 模型）+ glm-5.3-flash 代理 API 基线 | 本地代理账号池稳定时 |
 | A4 | 运行时真实验证：用户层覆盖退役生效 / driverAccess / L3 恢复断言 / crop 换算端到端 | 同 A1 |
 | A5 | dsv4fv OCR 数字噪声量化（S3 断言容差输入） | 与 S3 设计时一并 |
+| A6 | Windows 密码框投影探针（WinForms PasswordBox → screen_observe 形态实测）+ 凭据启发式命中验证 + move_cursor 坐标系顺带确认 | 下次 harness 重启后的日常使用顺带做；0.5.2 已先以离线启发式修复（PLAN-credential-guard） |
 
 ## B. 0.5.0 工具改进包（✅ 已发布 2026-09-06）
 

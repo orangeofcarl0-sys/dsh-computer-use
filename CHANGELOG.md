@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.2 (2026-09-06)
+
+**Windows 凭据硬保护静默失效根治**（规格 PLAN-credential-guard；发现于 dsv4fv 定位实验真值交叉检查）。
+
+### Fixed
+
+- **凭据硬保护在 Windows 上静默失效**：cua-driver 元素投影按平台原生命名 role（Windows = UIA 原生 `Edit/Button/…`，无 AX 前缀）且无密码标志位，guard 匹配 macOS AX 命名（`AXSecureTextField`）在 Windows 上永假——密码框检测整体失效且无任何注记。
+- 新增 `lib/roles.js` 跨平台角色语义层（单一出口）：密码**三态判定** `isPasswordCandidate`（结构化 AX 角色 ∪ Windows 启发式：文本输入类角色 × 密码词/掩码值，'显示密码'按钮等非输入类仅注记不硬拒）、`isActionableRole` 跨平台集合（**Windows 纯图标无标签按钮恢复编号**；AXSecureTextField 原遗漏补齐）。
+
+### Changed
+
+- 快照 entry 增加 `value` 字段（掩码判定数据源；`label` 不再合并 value）；`ROLE_SHORT` 补 Windows UIA 中文映射（Button→按钮 等）。
+
+### Security
+
+- PERMISSIONS.md 新增**「承诺验证矩阵」**（承诺 × 平台 × 验证载体 × 状态）——安全承诺自此按平台实测，杜绝"代码看起来对"式声明。
+- 上游契约缺口已提回：[trycua/cua#3576](https://github.com/trycua/cua/issues/3576)（请求元素投影增加 `is_password`）；补齐前 Windows 保护以启发式运行，误报面与语义见 PLAN-credential-guard §5/§6。
+
 ## 0.5.1 (2026-09-06)
 
 结构与复杂度优化（纯结构重构，**零行为变化**——19 工具注册面经 parity 脚本逐字段验证一致）。
