@@ -311,6 +311,8 @@ computer_click(x=640, y=420)
     nativeImage: auto
     visionProvider: deepseek-official
     visionModel: deepseek-v4-flash-vision-exp
+    permissionMode: standard
+    deliveryMode: background
 ```
 
 | 配置项 | 默认值 | 说明 |
@@ -322,8 +324,32 @@ computer_click(x=640, y=420)
 | `nativeImage` | `auto` | `auto` 自动降级；`full` 原图；`compact` 始终使用小图 |
 | `visionProvider` | `deepseek-official` | `vision` 模式使用的 provider |
 | `visionModel` | `deepseek-v4-flash-vision-exp` | `vision` 模式使用的视觉模型 |
+| `permissionMode` | `standard` | 权限模式：`standard` / `full-access` / `unrestricted`，见下节 |
+| `deliveryMode` | `background` | 前后台投递策略：`background` / `auto` / `foreground`，见下节 |
 
 > 安装脚本或 bundle patch 可能覆盖代码层默认值。请以实际生成的 `$DSH_HOME/cordis.patch.yml` 为准；多步任务建议显式写入 `ttlMs`，不要依赖隐式默认值。
+
+## 权限模式（permissionMode）
+
+| 模式 | 信息获取（观察/截图） | 动作护栏 |
+|---|---|---|
+| `standard`（默认） | 与既有行为一致 | 快照 TTL / 无快照拒绝 / 危险词审批 / 密码框保护，全部生效 |
+| `full-access` | **全权限**：窗口级观测失败（提权/完整性/UIA 等权限或引擎原因）时自动降级为桌面级采集（视觉仅读，坐标=桌面像素，明确不可直接用于动作）；AX 树为空时标注 `visualOnly`；观测结果附 `driverAccess`（驱动完整性/UIA/PostMessage 探测） | **不变**——动作侧一切护栏原样 |
+| `unrestricted` | 同 `full-access` | 在 `full-access` 基础上，危险词命中自动放行（不再向用户征询）；密码框保护与 `allowedApps` 区域白名单仍然生效 |
+
+`full-access` 解决"因权限导致的信息获取失败"：模型永远能"看到"界面（桌面级截图兜底），且降级结果不会产生可执行的窗口级坐标——不扩大动作危险性。桌面兜底截图仅供阅读内容，需要操作时请重试 `screen_observe`。
+
+## 前后台投递（deliveryMode）
+
+引擎的输入投递有两条通道：**后台**（UIA Invoke / PostMessage，目标窗口无需前台，不抢用户焦点，后台/最小化窗口也能操作）和**前台**（短暂焦点交换 + SendInput，操作后自动恢复原前台）。目标如果会静默丢弃后台事件（Chromium/Electron 内容、GTK、VCL/LibreOffice 等），引擎返回结构化 `background_unavailable` 而非假装成功。
+
+| 模式 | 行为 |
+|---|---|
+| `background`（默认） | 全程后台投递；后台不可用时返回结构化错误，并在结果中给出**可操作指引**（下次调用加 `foreground=true`）——不会静默失败 |
+| `auto` | 后台优先；命中 `background_unavailable` 时**自动以前台重试一次**（焦点交换后自动恢复），结果标注"已前台重试" |
+| `foreground` | 始终前台投递（仅明确已知无后台能力的目标） |
+
+单个动作可用 `foreground: true` 参数临时覆盖（不修改全局配置）。
 
 ## 平台支持 · Platform Support
 
@@ -551,6 +577,8 @@ Semantic checks are strongest for `element`-based actions. Coordinate actions an
     nativeImage: auto
     visionProvider: deepseek-official
     visionModel: deepseek-v4-flash-vision-exp
+    permissionMode: standard
+    deliveryMode: background
 ```
 
 | Option | Default | Description |
@@ -562,6 +590,8 @@ Semantic checks are strongest for `element`-based actions. Coordinate actions an
 | `nativeImage` | `auto` | `auto`, `full`, or `compact` screenshot strategy |
 | `visionProvider` | `deepseek-official` | Provider used by `vision` mode |
 | `visionModel` | `deepseek-v4-flash-vision-exp` | Image-capable observer model |
+| `permissionMode` | `standard` | `standard` / `full-access` (observe fallback to desktop capture, `visualOnly` marking, `driverAccess` info) / `unrestricted` (additionally auto-allows dangerous-word actions; password-field protection and `allowedApps` still apply) |
+| `deliveryMode` | `background` | Foreground/background delivery: `background` (no focus steal; structured `background_unavailable` with escalation hint) / `auto` (retry once in foreground when background unavailable; focus restored) / `foreground` (always front a brief focus swap). Per-action `foreground: true` overrides. |
 
 If an installer or bundle patch overrides the code-level default, the generated `$DSH_HOME/cordis.patch.yml` is authoritative. For multi-step tasks, set `ttlMs` explicitly instead of relying on an implicit default.
 

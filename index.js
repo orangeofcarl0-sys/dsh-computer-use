@@ -56,6 +56,28 @@ export const Config = z.object({
   visionProvider: z.string().default('deepseek-official'),
   /** Mode D 观察者模型（需声明 image 输入）。 */
   visionModel: z.string().default('deepseek-v4-flash-vision-exp'),
+  /**
+   * 权限模式：
+   *   standard    默认：所有护栏原样（快照 TTL / 无快照拒绝 / 危险词审批 / 密码框保护）。
+   *   full-access 信息获取全权限：窗口级观测失败时自动降级为桌面级采集（视觉仅读，
+   *               坐标系变为桌面像素，明确不可直接用于动作）；AX 树为空时标注
+   *               visualOnly 而非硬失败；观测结果附驱动权限面（check_permissions）。
+   *               动作侧一切护栏不变。
+   *   unrestricted 在 full-access 基础上，危险词命中时自动放行（不再向用户征询）；
+   *               密码框保护与区域白名单仍然生效。
+   */
+  permissionMode: z.union(['standard', 'full-access', 'unrestricted']).default('standard'),
+  /**
+   * 输入投递策略（前后台）：
+   *   background 默认：全程后台投递（UIA Invoke / PostMessage，不抢用户焦点）；
+   *               后台不可用时返回结构化错误并给出 foreground=true 升级指引。
+   *   auto       后台优先；命中 background_unavailable 时自动以前台重试一次
+   *               （驱动短暂交换焦点后恢复原前台）并标注结果——不会"被阻拦"，
+   *               也不会"被忽视"（后台静默 no-op 的目标由驱动判定）。
+   *   foreground 始终前台投递（短暂焦点交换）。
+   * 工具级 foreground=true 可对单次动作强制前台。
+   */
+  deliveryMode: z.union(['background', 'auto', 'foreground']).default('background'),
 })
 
 /** 统一输出 schema：ok + result 文本。 */
@@ -107,6 +129,14 @@ function renderWithImage(_args, value) {
   ]
 }
 
+/** 前后台投递的单次覆盖参数（点击/输入/按键/滚动/拖拽共用）。 */
+const FOREGROUND_PARAM = {
+  foreground: {
+    type: 'boolean',
+    description: '可选：本次动作强制前台投递（驱动短暂交换焦点后自动恢复原前台）。默认按 deliveryMode：background=不抢焦点 / auto=后台不可用时自动升级一次。',
+  },
+}
+
 /** 统一的坐标/编号参数块（坐标 = 窗口本地截图像素）。 */
 const TARGET_PARAMS = {
   element: {
@@ -132,6 +162,8 @@ export function apply(ctx, config) {
     nativeImage: config.nativeImage || 'auto',
     visionProvider: config.visionProvider || 'deepseek-official',
     visionModel: config.visionModel || 'deepseek-v4-flash-vision-exp',
+    permissionMode: config.permissionMode || 'standard',
+    deliveryMode: config.deliveryMode || 'background',
   }
 
   // 初始化虚拟光标：声明统一会话 + 应用主题（异步，不阻塞插件加载）
@@ -200,6 +232,23 @@ export function apply(ctx, config) {
         },
       },
       screenshotFile: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      visualOnly: { type: 'boolean', description: 'true = 无可用 AX 树或已桌面级降级，仅视觉信息（不可直接用于坐标动作）。' },
+      driverAccess: {
+        oneOf: [
+          {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              elevated: { type: 'boolean' },
+              integrityLevel: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+              uia: { type: 'boolean' },
+              postMessage: { type: 'boolean' },
+            },
+          },
+          { type: 'null' },
+        ],
+        description: '权限模式 full-access/unrestricted 下附带；来源 cua-driver check_permissions。',
+      },
       ...IMAGE_FIELD,
     }), render: renderWithImage },
     execute: wrap('screen_observe', (args, cfg2, exec) => screenObserve(ctx, args, cfg2, exec)),
@@ -226,34 +275,35 @@ export function apply(ctx, config) {
 
   ctx.tools.register(defineTool({
     name: 'computer_click',
-    description: '点击：传入 screen_observe 输出的元素编号（element），或窗口截图像素坐标（x,y）。点击的是 cua-driver 的虚拟光标，不抢真实鼠标。',
-    parameters: { ...TARGET_PARAMS, count: { type: 'integer', description: '可选：点击次数，默认 1。' } },
+    description: '点击：传入 screen_observe 输出的元素编号（element），或窗口截图像素坐标（x,y）。点击的是 cua-driver 的虚拟光标，不抢真实鼠标。默认后台投递（后台/最小化/隐藏窗口也可点，不抢焦点）；命中后台不可用错误时按提示加 foreground=true 重试。',
+    parameters: { ...TARGET_PARAMS, ...FOREGROUND_PARAM, count: { type: 'integer', description: '可选：点击次数，默认 1。' } },
     output: OUT(),
     execute: wrap('computer_click', (args, cfg2) => click(args, cfg2)),
   }))
 
   ctx.tools.register(defineTool({
     name: 'computer_double_click',
-    description: '双击：element 编号 或 x/y 坐标。',
-    parameters: TARGET_PARAMS,
+    description: '双击：element 编号 或 x/y 坐标（后台投递，不抢焦点）。',
+    parameters: { ...TARGET_PARAMS, ...FOREGROUND_PARAM },
     output: OUT(),
     execute: wrap('computer_double_click', (args, cfg2) => doubleClick(args, cfg2)),
   }))
 
   ctx.tools.register(defineTool({
     name: 'computer_right_click',
-    description: '右键点击：element 编号 或 x/y 坐标。',
-    parameters: TARGET_PARAMS,
+    description: '右键点击：element 编号 或 x/y 坐标（后台投递，不抢焦点）。',
+    parameters: { ...TARGET_PARAMS, ...FOREGROUND_PARAM },
     output: OUT(),
     execute: wrap('computer_right_click', (args, cfg2) => rightClick(args, cfg2)),
   }))
 
   ctx.tools.register(defineTool({
     name: 'computer_type',
-    description: '文本输入：向当前焦点（或指定元素）输入一段文本。注意：不要在密码框使用——密码必须由用户本人输入（敏感输入保护）。',
+    description: '文本输入：向当前焦点（或指定元素）输入一段文本。指定 element 时走 UIA ValuePattern 后台写入（不抢焦点，XAML/WinUI 主机必需）；注意：不要在密码框使用——密码必须由用户本人输入（敏感输入保护）。',
     parameters: {
       text: { type: 'string', required: true, description: '要输入的文本。' },
       element: TARGET_PARAMS.element,
+      ...FOREGROUND_PARAM,
     },
     output: OUT(),
     execute: wrap('computer_type', (args, cfg2) => typeText(args, cfg2)),
@@ -261,9 +311,10 @@ export function apply(ctx, config) {
 
   ctx.tools.register(defineTool({
     name: 'computer_key',
-    description: '按键 / 快捷键：如 return、tab、escape、cmd+c、shift+tab。',
+    description: '按键 / 快捷键：如 return、tab、escape、cmd+c、shift+tab（默认后台 PostMessage 投递，目标窗口无需前台）。',
     parameters: {
       key: { type: 'string', required: true, description: '按键名或组合（示例: return / cmd+c / shift+tab / cmd+shift+p）。' },
+      ...FOREGROUND_PARAM,
     },
     output: OUT(),
     execute: wrap('computer_key', (args, cfg2) => key(args, cfg2)),
@@ -276,6 +327,7 @@ export function apply(ctx, config) {
       direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: '滚动方向，默认 down。' },
       amount: { type: 'integer', description: '可选：滚动格数，默认 3。' },
       element: TARGET_PARAMS.element,
+      ...FOREGROUND_PARAM,
     },
     output: OUT(),
     execute: wrap('computer_scroll', (args, cfg2) => scroll(args, cfg2)),
@@ -290,6 +342,7 @@ export function apply(ctx, config) {
       to_x: { type: 'integer', required: true, description: '终点 x。' },
       to_y: { type: 'integer', required: true, description: '终点 y。' },
       duration_ms: { type: 'integer', description: '可选：拖拽耗时毫秒，默认 500。' },
+      ...FOREGROUND_PARAM,
     },
     output: OUT(),
     execute: wrap('computer_drag', (args, cfg2) => drag(args, cfg2)),

@@ -6,5 +6,16 @@
     - id: dsh-computer-use
       name: dsh-computer-use
       config:
-        ttlMs: 15000
+        ttlMs: 30000
         maxElements: 500
+        # 权限模式（2026-09-04 加入）：
+        #   standard     默认：护栏原样
+        #   full-access  信息获取全权限：窗口级观测失败自动降级桌面级采集（视觉仅读），
+        #                AX 树为空标注 visualOnly，观测附驱动权限面；动作护栏不变
+        #   unrestricted 额外放行危险词审批（密码框保护 / 白名单仍生效）
+        permissionMode: standard
+        # 前后台投递（2026-09-04 加入）：
+        #   background 默认：全程后台（不抢焦点）；后台不可用→结构化错误+升级指引
+        #   auto       后台优先；background_unavailable 时自动前台重试一次（驱动恢复原焦点）
+        #   foreground 始终前台（短暂焦点交换）
+        deliveryMode: background
