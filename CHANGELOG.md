@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0 (2026-09-06)
+
+工具改进包（规格 PLAN-tools-v0.5，拍板：D1 独立工具 / D2 锁存+resume / D3 hover 入包）。12 → **19 工具**。
+
+### Added
+
+- **`computer_verify`**：确定性验证——driver `verify_state` 包装，1-8 条结构化谓词（element: role/label_contains × exists/enabled/selected/value_equals；window: exists/bounds±tolerance）AND 求值；satisfied / unsatisfied / **unknown**（unknown 永不视为成功，fail-closed）；可选截图证据。
+- **`computer_wait_for`**：谓词轮询等待，满足即返回（含等待时长/次数），超时结构化失败（不伪装成功）——替代盲等。
+- **`computer_clipboard`**：剪贴板读写；`write` + `ctrl+v` 组成可靠"粘贴流"。
+- **`computer_menu`**：菜单路径直调（driver `invoke_menu`，fail-closed，绝不回退像素）。
+- **`computer_hover`**（实验性）：移动虚拟光标；`real=true` 移动真实 OS 指针（scope=desktop）。真实 hover 效果取决于应用，未验证。
+- **`computer_stop` / `computer_resume`**：强杀开关——stop 结束驱动会话 + 清观察快照 + **锁存全部桌面操作**（观察/动作/应用一律拒绝）；resume 唯一解锁路径并预热会话。S3 的确定性半边就此补齐。
+
+### Security
+
+- 锁存闸门位于守卫之前（锁存优先级最高）；stop/resume 均带审计注记；凭据硬保护与极危注记不受影响。
+
 ## 0.4.1 (2026-09-05)
 
 依据 dsv4fv 像素定位实验（SURVEY 附录A：整窗裸定位 median>300px、先验驱动的布局重建、目标主导小裁剪 13-80px）落地 S2 修订。

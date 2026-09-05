@@ -1,7 +1,7 @@
 {
   "name": "dsh-computer-use",
-  "version": "0.4.1",
-  "description": "DeepSeek Harness 的桌面操作插件（个人项目）：12 个模型友好工具，零审批自动提权，后台优先三级投递链，Windows 深度实测",
+  "version": "0.5.0",
+  "description": "DeepSeek Harness 的桌面操作插件（个人项目）：19 个模型友好工具（确定性验证/谓词轮询/剪贴板/菜单直调/强杀开关），零审批自动提权，后台优先三级投递链，Windows 深度实测",
   "type": "module",
   "main": "index.js",
   "license": "MIT",

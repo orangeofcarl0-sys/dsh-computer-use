@@ -12,7 +12,7 @@
 
 ## 这是什么
 
-给 [DeepSeek Harness](https://github.com/988hj7tczd-oss/harness-desktop) 加一套可观察、可验证的桌面操作层：12 个模型友好工具，底层通过 [cua-driver](https://github.com/trycua/cua) 驱动本地桌面（独立虚拟光标，不抢真实鼠标）。Windows 深度实测——前台锁、XAML/WinUI 输入、观测几何这些硬墙都在本机踩过并解决。
+给 [DeepSeek Harness](https://github.com/988hj7tczd-oss/harness-desktop) 加一套可观察、可验证的桌面操作层：19 个模型友好工具，底层通过 [cua-driver](https://github.com/trycua/cua) 驱动本地桌面（独立虚拟光标，不抢真实鼠标）。Windows 深度实测——前台锁、XAML/WinUI 输入、观测几何这些硬墙都在本机踩过并解决。
 
 三个核心机制：
 
@@ -42,8 +42,11 @@
 | 三级投递链 | background → foreground → bring_to_front 绕锁，完成后恢复原前台 |
 | 观测几何根治 | 1:1 窗口截图（`max_image_dimension` 配置化），点击零标定命中 |
 | 应用管理 | 列出运行中应用、后台启动、按需前置 |
+| 确定性验证 | `computer_verify` / `computer_wait_for`：UIA 谓词断言与轮询（unknown 永不视为成功） |
+| 剪贴板与菜单 | 剪贴板读写（粘贴流）；菜单路径直调（fail-closed） |
+| 强杀开关 | `computer_stop` 锁存全部桌面操作，`computer_resume` 唯一解锁 |
 
-## 12 个工具
+## 19 个工具
 
 | 工具 | 作用 | 主要参数 |
 |---|---|---|
@@ -57,6 +60,13 @@
 | `computer_scroll` | 滚动 | `direction`, `amount`, `element`, `foreground` |
 | `computer_drag` | 截图坐标拖拽 | `from_x/from_y → to_x/to_y`, `duration_ms`, `foreground` |
 | `computer_wait` | 等待加载/动画 | `ms`（1-60000） |
+| `computer_verify` | **确定性验证**：1-8 条谓词求值（satisfied/unsatisfied/unknown） | `pid`, `window_id`, `expect` |
+| `computer_wait_for` | **谓词轮询等待**：满足即返回，超时结构化失败 | `expect`, `timeoutMs`, `pollMs` |
+| `computer_clipboard` | 剪贴板读写（write+ctrl+v = 可靠粘贴流） | `action`, `text` |
+| `computer_menu` | 菜单路径直调（fail-closed，不回退像素） | `pid`, `window_id`, `path` |
+| `computer_hover` | 悬停（实验性：覆盖层 / real=真实指针） | `pid`, `window_id`, `x`, `y`, `real` |
+| `computer_stop` | **强杀开关**：结束会话并锁存全部桌面操作 | 无 |
+| `computer_resume` | 解锁 stop 并预热会话（唯一解锁路径） | 无 |
 | `app_list` | 列出运行中的应用 | 无 |
 | `app_launch` | 启动应用（后台，可选前置） | `name` / `bundle_id`, `bring_to_front` |
 
@@ -193,7 +203,7 @@ node verify-runtime.mjs            # 运行时验证（需真实 harness + cua-d
 
 # English (brief)
 
-Personal Computer Use plugin for the DeepSeek Harness: 12 model-friendly tools driving local desktops through [cua-driver](https://github.com/trycua/cua) with an isolated virtual cursor. Windows-deep-tested.
+Personal Computer Use plugin for the DeepSeek Harness: 19 model-friendly tools driving local desktops through [cua-driver](https://github.com/trycua/cua) with an isolated virtual cursor. Windows-deep-tested.
 
 **Stance — zero-friction autonomy**: no approval prompts, no interruptions; capabilities always on (auto desktop-level observation fallback, three-tier delivery escalation that restores the previous foreground). The only hard refusal is automated typing into password fields. `extremePatterns` adds non-blocking warning notes.
 
