@@ -6,6 +6,7 @@
 
 ### Added
 
+- **S3a 视觉断言协议**（PLAN-s3-model-verifier）：A5 实证（可读 PNG 证据上 dsv4fv 数字转述噪声≈0、zoom JPEG 对小字号不可读、模型证据不足时 2/2 诚实拒答、同会话历史回声风险）落为工具描述协议——数字断言逐字双向校验不做编辑距离放宽、文字模糊子串+同义对照、只认本轮新鲜证据、不可读=unknown 不得编造；注入 `screen_observe`/`screen_zoom`/`computer_verify` 描述。零新工具零新权限；S3b（screen_assert 工具/独立观察者裁决）待观察者条件成熟。
 - **UIA sidecar**（`tools/uia-password-scan.ps1` + `lib/passwordScan.js`）：`screen_observe` 时遍历目标窗口元素，密码 = `IsPassword`（现代框架 provider）∨ `ES_PASSWORD` 样式位（经典 Win32，`NativeWindowHandle` + `GetWindowLongW` 实测）→ 标记快照 entry → guard **结构位优先**硬拒。失败/超时（3s）自动降级启发式并在结果注记；误差方向安全（坐标错配只会漏标不会误标）。
 - `tools/password-probe.ps1` 自包含探针（A6）：WinForms 密码框 + UIA 自扫 + Win32 样式真值三重交叉验证；出货版 sidecar 已对活体探针窗口端到端命中（无标签空值密码框，count=1）。
 

@@ -38,4 +38,4 @@
 - 隔离档（permissionMode 已删，若需要走一次性会话/VM 路线）
 - O1 UIAccess worker（重开条件：trycua 合规安装器 / 证书可离线验证 / 策略确认）
 - 评测回归任务集（S4：10-20 条 WAA 式 PowerShell oracle 任务）
-- S3 模型侧验证器（dsv4fv 读图断言 + OCR 噪声容差）——在确定性 verify_state 之外按需叠加
+- S3 模型侧验证器——**S3a 协议层已落地**（2026-09-06，commit 2137960：视觉断言协议注入 observe/zoom/verify 描述；A5 实证依据见 PLAN-s3-model-verifier）。剩余 S3b：screen_assert 工具 / 独立观察者裁决（前置：ZHIPU_API_KEY 或 dsv4fv 观察者文本输出修复）
