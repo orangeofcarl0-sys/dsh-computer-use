@@ -6,7 +6,7 @@
 
 | # | 事项 | 触发条件 |
 |---|---|---|
-| A1 | dsh 真实通道复测 dsv4fv native/vision（attachments+ctx.llm 管线 vs 裸 API 下界） | 下次 harness 重启后的日常使用顺带做 |
+| A1 | dsh 真实通道复测 dsv4fv native/vision（attachments+ctx.llm 管线 vs 裸 API 下界） | ✅ 2026-09-06 会话实测（模型 DeepSeek-V4-Flash-Vision-Exp/High）：ax ✓（注记/guard 全对）、native ✓（图片块经宿主 attachments 管线到模型，准确描述布局；首 token 0.9s/116 tok/s/缓存 74%）、vision 管线 ✓ 但**观察者半通**——dsv4fv 作观察者只输出思考不返回文本，GLM 兜底因未配 ZHIPU_API_KEY 优雅降级提示（不崩溃）；后续：配 key 启用兜底或换观察者模型 |
 | A2 | GLM agent 通道跨 run 漂移 + SoM 标号绑定复测（若可行，S2 SoM 复活） | 需要像素路径升级为常规路径时 |
 | A3 | qwen3-vl 坐标帧错位根因（代理缩图 vs 模型）+ glm-5.3-flash 代理 API 基线 | 本地代理账号池稳定时 |
 | A4 | 运行时真实验证：用户层覆盖退役生效 / driverAccess / L3 恢复断言 / crop 换算端到端 | 同 A1 |
