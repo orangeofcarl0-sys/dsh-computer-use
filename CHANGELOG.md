@@ -13,6 +13,10 @@
 
 - Config 新增 `passwordScan: 'auto' | 'off'`（默认 auto；off = 零 spawn，凭据保护退回启发式）。权限面新增 powershell 固定 argv spawn（随包脚本、只读、无网络），PERMISSIONS/summary/命令清单如实更新；承诺矩阵 Windows 凭据行升级为「结构位」。
 
+### Fixed
+
+- **结构密码标记坐标系错误**（A6 运行时端到端发现，2026-09-06）：`markElementsFromScan` 按"元素中心=窗口本地 + 原点换算"旧假设设计，而 cua-driver 0.23.2 的 frame 与 sidecar rect 同为**屏幕锚定物理像素**（同一密码框两套独立系统读数逐像素相等，探针 E2E 实证）——原点换算使标记整体偏移一个窗口原点向量，实测**标错相邻元素**（真密码框漏标 → guard 放行；上方普通框误标 → 误拒）。改为屏幕坐标直配，废弃双原点候选。sidecar 由 node 派生继承 DPI 感知返回物理 px（bash 直跑探针得逻辑 px，仅影响独立实验，部署路径一致）。E2E 9/9：注记/guard 硬拒/零误拒/sidecar 时延 1.4-1.6s/crop 元数据全通过。
+
 ## 0.5.2 (2026-09-06)
 
 **Windows 凭据硬保护静默失效根治**（规格 PLAN-credential-guard；发现于 dsv4fv 定位实验真值交叉检查）。

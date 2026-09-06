@@ -11,7 +11,8 @@
 | A3 | qwen3-vl 坐标帧错位根因（代理缩图 vs 模型）+ glm-5.3-flash 代理 API 基线 | 本地代理账号池稳定时 |
 | A4 | 运行时真实验证：用户层覆盖退役生效 / driverAccess / L3 恢复断言 / crop 换算端到端 | 同 A1 |
 | A5 | dsv4fv OCR 数字噪声量化（S3 断言容差输入） | 与 S3 设计时一并 |
-| A6 | Windows 密码框投影探针（WinForms PasswordBox → screen_observe 形态实测）+ 凭据启发式命中验证 + move_cursor 坐标系顺带确认 | 下次 harness 重启后的日常使用顺带做；0.5.2 已先以离线启发式修复（PLAN-credential-guard） |
+| A6 | Windows 密码框投影探针（WinForms PasswordBox → screen_observe 形态实测）+ 凭据启发式命中验证 + move_cursor 坐标系顺带确认 | ✅ 2026-09-06 运行时 E2E（真实驱动+探针 9/9）：结构密码标记注记 ✓、guard 结构位硬拒 ✓、普通框零误拒 ✓、sidecar 时延 1.4-1.6s（阈值 5s）✓、zoom crop 元数据 ✓。**发现并修复标记坐标系错误**（frame=屏幕px 直配，见 CHANGELOG 0.5.3 Fixed）；move_cursor window-scope 实测返回 unverifiable/non_applicable（较"硬拒 invalid_action_target"记档已变化）；驱动对空值经典 Edit 返回伪 value 数字（显示噪声，启发式不受影响）；截图为窗口裁剪（606x287）而 frame 为屏幕 px |
+| A7 | **坐标语义落点实验**：observe 元素 frame=屏幕 px（实证），截图=窗口裁剪，header 标注"窗口本地截图像素"与 zoom 换算公式（无 +窗口原点项）疑似与坐标点击语义矛盾——0.4.1 实测 zoom 定位误差 13-80px 恰为窗口原点量级 | 探针窗固定位置坐标点击读回落点（与 S3/下次定位实验一并做） |
 
 ## B. 0.5.0 工具改进包（✅ 已发布 2026-09-06）
 

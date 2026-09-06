@@ -109,9 +109,9 @@ const scanJson = JSON.stringify({ window: { left: 40, top: 40, width: 630, heigh
 let spawned = 0
 let s = await scanPasswords({ hwnd: 123, timeoutMs: 2000 }, () => { spawned++; return fakeChild(scanJson) })
 check('H1: sidecar 解析 + 单元素解包防御', s !== null && s.password.length === 1 && s.password[0].x === 102 && s.window.left === 40 && spawned === 1)
-const els = [{ frame: { x: 0, y: 0, w: 100, h: 30 } }, { frame: { x: 300, y: 190, w: 114, h: 30 } }]
-const marked = markElementsFromScan(els, s, { origins: [{ x: 0, y: 0 }, { x: 40, y: 40 }] })
-check('H2: rect 包含标记 + 双原点消歧（1 命中 1 不中）', marked === 1 && els[1].is_password === true && !els[0].is_password)
+const els = [{ frame: { x: 102, y: 152, w: 510, h: 32 } }, { frame: { x: 102, y: 227, w: 510, h: 32 } }]
+const marked = markElementsFromScan(els, s)
+check('H2: 屏幕坐标直配（frame=屏幕px 与 sidecar 同系，1 命中 1 不中；探针实测坐标）', marked === 1 && els[1].is_password === true && !els[0].is_password)
 setSnapshot({ at: Date.now(), ttlMs: cfg.ttlMs, pid: 1, windowId: 2, appName: 'A', snapshotId: 's1', entries: new Map([
   [20, { token: 't20', role: 'Edit', label: '', value: '', is_password: true }],
 ]) })
