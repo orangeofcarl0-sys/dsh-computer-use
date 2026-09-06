@@ -47,7 +47,7 @@ public static class W32 {
   for ($i = 0; $i -lt 10; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 80 }
 
   if ($KeepOpenSec -gt 0) {
-    [Console]::Out.WriteLine(('{"hwnd":' + [int]$form.Handle + '}'))
+    [Console]::Out.WriteLine(('{"hwnd":' + [int]$form.Handle + ',"pid":' + $PID + '}'))
     [Console]::Out.Flush()
     Start-Sleep -Seconds $KeepOpenSec
   }
