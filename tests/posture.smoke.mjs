@@ -163,4 +163,44 @@ check('E5: S3a 视觉断言协议注入三工具描述',
   && /screen_observe 的视觉断言协议/.test(idxSrc)
   && /视觉断言通道提示/.test(idxSrc))
 
+// I. 快照新鲜度语义（PLAN-snapshot-freshness：失效原因三分类 + supersession + 干预哨兵）
+const snapMod = await import(libUrl('snapshot.js'))
+const setSnapI = (id) => snapMod.setSnapshot({
+  at: Date.now(), ttlMs: 60000, pid: 1, windowId: 2, appName: 'A', snapshotId: id, entries: new Map(),
+})
+let expiredMsg = ''
+// 过期场景：手工构造过期快照
+snapMod.setSnapshot({ at: Date.now() - 61000, ttlMs: 60000, pid: 1, windowId: 2, appName: 'A', snapshotId: 's000000aa', entries: new Map([[1, { token: 't1' }]]) })
+try { snapMod.resolveToken(1, 60000) } catch (e) { expiredMsg = e.message }
+check('I1: 过期错误含 [snapshot_expired] + 快照 id + 指引',
+  /\[snapshot_expired\]/.test(expiredMsg) && /s000000aa/.test(expiredMsg) && /screen_observe/.test(expiredMsg))
+
+setSnapI('s000000ab')
+snapMod.markConsumed('type_text')
+check('I2: note 档同快照连击出一致性注记', /快照一致性提示/.test(snapMod.freshnessGate({ supersession: 'note' }).note))
+let consumedMsg = ''
+try { snapMod.freshnessGate({ supersession: 'enforce' }) } catch (e) { consumedMsg = e.message }
+check('I3: enforce 档同快照连击拒绝 [snapshot_consumed]', /\[snapshot_consumed\]/.test(consumedMsg))
+check('I4: off 档零注记零拒绝', snapMod.freshnessGate({ supersession: 'off' }).note === '')
+snapMod.markSuspect('click')
+check('I5: 可疑注记含干预可能（note 档）',
+  /不可验证/.test(snapMod.freshnessGate({ supersession: 'note' }).note) && /干预/.test(snapMod.freshnessGate({ supersession: 'note' }).note))
+setSnapI('s000000ac')
+check('I6: 新快照清空消费/可疑', snapMod.freshnessGate({ supersession: 'note' }).note === '' && !snapMod.isConsumed())
+let mismatchMsg = ''
+try { snapMod.validateSnapshotId('s000000zz') } catch (e) { mismatchMsg = e.message }
+check('I7: snapshot_id 不匹配拒绝 [snapshot_mismatch]', /\[snapshot_mismatch\]/.test(mismatchMsg) && /s000000ac/.test(mismatchMsg))
+let idOk = true
+try { snapMod.validateSnapshotId('s000000ac'); snapMod.validateSnapshotId(undefined) } catch { idOk = false }
+check('I8: snapshot_id 匹配/未提供照常', idOk)
+
+// I9: 执行侧接线（四条 mutate 路径 + observe 输出）
+const actionsSrc = readFileSync(join(root, 'lib', 'actions.js'), 'utf8')
+const observeSrc = readFileSync(join(root, 'lib', 'observe.js'), 'utf8')
+check('I9: 执行侧接线（validate/gate/consume 四路径 + observe.snapshotId）',
+  (actionsSrc.match(/validateSnapshotId\(args\.snapshot_id\)/g) || []).length >= 4
+  && (actionsSrc.match(/markConsumed\(/g) || []).length >= 4
+  && (actionsSrc.match(/freshnessGate\(cfg\)/g) || []).length >= 4
+  && /snapshotId: state\.snapshot_id/.test(observeSrc))
+
 process.exit(failures > 0 ? 1 : 0)

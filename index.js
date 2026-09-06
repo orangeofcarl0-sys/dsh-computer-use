@@ -69,6 +69,14 @@ export const Config = z.object({
    */
   passwordScan: z.union(['auto', 'off']).default('auto'),
   /**
+   * 快照新鲜度（PLAN-snapshot-freshness）：同快照连击的引用作废语义。
+   *   note 默认：同一快照被动作消费后，后续动作附一致性注记（不阻断，"确认未变可继续"）；
+   *   enforce：同快照第二次动作直接拒绝（[snapshot_consumed]），直至重新 screen_observe
+   *            ——ZCode 式每动作一观察，代价 = 每动作约 +10s 观察成本；
+   *   off：全关闭（零注记零拒绝）。不可验证动作的状态可疑注记同受此开关约束。
+   */
+  supersession: z.union(['off', 'note', 'enforce']).default('note'),
+  /**
    * 输入投递策略（前后台）：
    *   auto 默认：后台优先；命中 background_unavailable 时自动以前台重试
    *              （驱动短暂交换焦点后恢复原前台）并标注结果——不会"被阻拦"，
@@ -165,6 +173,14 @@ const TARGET_PARAMS = {
   },
 }
 
+/** 显式证据基线（PLAN-snapshot-freshness §3.4）：动作声明它基于哪次观察。 */
+const SNAPSHOT_ID_PARAM = {
+  snapshot_id: {
+    type: 'string',
+    description: '可选：本动作基于的 screen_observe 快照 id（观察返回的 snapshotId，如 "s000000b2"）。与当前快照不一致时动作被拒（[snapshot_mismatch]），确保操作基于最新观察。',
+  },
+}
+
 const VERIFY_RESULT = {
   status: { type: 'string', description: 'satisfied / unsatisfied / unknown（unknown = 无法证明，不是失败也不是成功）' },
   stable: { type: 'boolean' },
@@ -244,6 +260,7 @@ function registerObserveTools(ctx, cfg, wrap) {
         },
       },
       screenshotFile: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      snapshotId: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '本次观察的快照 id（动作可携带 snapshot_id 声明证据基线）。' },
       visualOnly: { type: 'boolean', description: 'true = 无可用 AX 树或已桌面级降级，仅视觉信息（不可直接用于坐标动作）。' },
       driverAccess: {
         oneOf: [
@@ -304,7 +321,7 @@ function registerActionTools(ctx, cfg, wrap) {
   ctx.tools.register(defineTool({
     name: 'computer_click',
     description: '点击：传入 screen_observe 输出的元素编号（element），或窗口截图像素坐标（x,y）。点击的是 cua-driver 的虚拟光标，不抢真实鼠标。默认后台投递（后台/最小化/隐藏窗口也可点，不抢焦点）；后台不可用时按 deliveryMode（默认 auto）自动升级投递并恢复原前台。',
-    parameters: { ...TARGET_PARAMS, ...FOREGROUND_PARAM, count: { type: 'integer', description: '可选：点击次数，默认 1。' } },
+    parameters: { ...TARGET_PARAMS, ...SNAPSHOT_ID_PARAM, ...FOREGROUND_PARAM, count: { type: 'integer', description: '可选：点击次数，默认 1。' } },
     output: OUT(),
     execute: wrap('computer_click', (args, cfg2) => click(args, cfg2)),
   }))
@@ -312,7 +329,7 @@ function registerActionTools(ctx, cfg, wrap) {
   ctx.tools.register(defineTool({
     name: 'computer_double_click',
     description: '双击：element 编号 或 x/y 坐标（后台投递，不抢焦点）。',
-    parameters: { ...TARGET_PARAMS, ...FOREGROUND_PARAM },
+    parameters: { ...TARGET_PARAMS, ...SNAPSHOT_ID_PARAM, ...FOREGROUND_PARAM },
     output: OUT(),
     execute: wrap('computer_double_click', (args, cfg2) => doubleClick(args, cfg2)),
   }))
@@ -320,7 +337,7 @@ function registerActionTools(ctx, cfg, wrap) {
   ctx.tools.register(defineTool({
     name: 'computer_right_click',
     description: '右键点击：element 编号 或 x/y 坐标（后台投递，不抢焦点）。',
-    parameters: { ...TARGET_PARAMS, ...FOREGROUND_PARAM },
+    parameters: { ...TARGET_PARAMS, ...SNAPSHOT_ID_PARAM, ...FOREGROUND_PARAM },
     output: OUT(),
     execute: wrap('computer_right_click', (args, cfg2) => rightClick(args, cfg2)),
   }))
@@ -331,6 +348,7 @@ function registerActionTools(ctx, cfg, wrap) {
     parameters: {
       text: { type: 'string', required: true, description: '要输入的文本。' },
       element: TARGET_PARAMS.element,
+      ...SNAPSHOT_ID_PARAM,
       ...FOREGROUND_PARAM,
     },
     output: OUT(),
@@ -342,6 +360,7 @@ function registerActionTools(ctx, cfg, wrap) {
     description: '按键 / 快捷键：如 return、tab、escape、cmd+c、shift+tab（默认后台 PostMessage 投递，目标窗口无需前台）。',
     parameters: {
       key: { type: 'string', required: true, description: '按键名或组合（示例: return / cmd+c / shift+tab / cmd+shift+p）。' },
+      ...SNAPSHOT_ID_PARAM,
       ...FOREGROUND_PARAM,
     },
     output: OUT(),
@@ -355,6 +374,7 @@ function registerActionTools(ctx, cfg, wrap) {
       direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: '滚动方向，默认 down。' },
       amount: { type: 'integer', description: '可选：滚动格数，默认 3。' },
       element: TARGET_PARAMS.element,
+      ...SNAPSHOT_ID_PARAM,
       ...FOREGROUND_PARAM,
     },
     output: OUT(),
@@ -370,6 +390,7 @@ function registerActionTools(ctx, cfg, wrap) {
       to_x: { type: 'integer', required: true, description: '终点 x。' },
       to_y: { type: 'integer', required: true, description: '终点 y。' },
       duration_ms: { type: 'integer', description: '可选：拖拽耗时毫秒，默认 500。' },
+      ...SNAPSHOT_ID_PARAM,
       ...FOREGROUND_PARAM,
     },
     output: OUT(),
@@ -523,6 +544,7 @@ export function apply(ctx, config) {
   const cfg = {
     ttlMs: config.ttlMs,
     maxElements: config.maxElements,
+    supersession: config.supersession || 'note',
     allowedApps: Array.isArray(config.allowedApps) ? config.allowedApps : [],
     cursorTheme: config.cursorTheme,
     nativeImage: config.nativeImage || 'auto',
