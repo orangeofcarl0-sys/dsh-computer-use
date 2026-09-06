@@ -157,5 +157,10 @@ check('E3: Config 默认 deliveryMode=auto / ttlMs=60000',
   && /ttlMs: z\.number\(\)\.default\(60000\)/.test(idxSrc))
 check('E4: cordis.patch.yml 翻转且无 permissionMode',
   yml.includes('ttlMs: 60000') && yml.includes('deliveryMode: auto') && !yml.includes('permissionMode'))
+check('E5: S3a 视觉断言协议注入三工具描述',
+  (idxSrc.match(/S3_ASSERT_PROTOCOL/g) || []).length >= 3
+  && /数字断言逐字双向校验/.test(idxSrc) && /不得编造/.test(idxSrc)
+  && /screen_observe 的视觉断言协议/.test(idxSrc)
+  && /视觉断言通道提示/.test(idxSrc))
 
 process.exit(failures > 0 ? 1 : 0)

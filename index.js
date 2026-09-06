@@ -111,6 +111,17 @@ const IMAGE_FIELD = {
   },
 }
 
+/**
+ * S3a 视觉断言协议（模型侧验证器，PLAN-s3-model-verifier §4）。
+ * 依据（A5 实证，2026-09-06）：可读 PNG 证据上数字转述噪声≈0（93 位零错误）；
+ * zoom JPEG 对 ~13px 小字不可读（模型 2/2 诚实拒答）；同会话历史回声风险真实。
+ */
+const S3_ASSERT_PROTOCOL =
+  '视觉断言协议：只以本次调用返回的截图为证据，跨轮读数不得复用。' +
+  '文字断言用模糊子串匹配（容忍大小写/空白/标点；同义 UI 词按常见对照，如 返回=后退、确定=OK）。' +
+  '数字断言逐字双向校验、不做编辑距离放宽——读不出或对不上时换裁剪或换通道重读一次，两次不一致按 unknown 上报；' +
+  '证据不可读时如实报 unknown，不得编造。'
+
 /** render：值含 image 时追加图片块（主模型原生直读）。 */
 function renderWithImage(_args, value) {
   if (!value.image) return [{ type: 'text', text: value.result }]
@@ -192,7 +203,7 @@ function registerObserveTools(ctx, cfg, wrap) {
       '操作电脑前必须先调用本工具取得快照；之后用 computer_click(element=[编号]) 或 computer_click(x=,y=) 操作（坐标为窗口本地截图像素）。' +
       'mode 选择：ax（默认，零成本树）/ vision（DeepSeek 视觉观察者结构化描述，免 ZHIPU key）/ native（截图直读，当前对话模型直接看图，需模型支持图片输入）。' +
       'AX 树无法解析（游戏/Canvas/Electron）时自动降级：native（若当前模型支持图片）→ vision → ax。' +
-      '快照默认 60 秒过期，过期后需重新观察。',
+      '快照默认 60 秒过期，过期后需重新观察。' + S3_ASSERT_PROTOCOL,
     parameters: {
       window: {
         type: 'string',
@@ -261,7 +272,8 @@ function registerObserveTools(ctx, cfg, wrap) {
       '区域截图直读：裁剪窗口某块区域（截图像素坐标）为 ≤500px JPEG 并以图片返回，当前对话模型直接看图。' +
       '两种用法：①"放大某块区域细看"（小字、图标、图表），图片 token 远小于整窗截图；' +
       '②定位原语（树空/像素目标推荐路径）：在本图内语义确认目标后，取"图内坐标 × crop.scale + crop.x/y"得到整窗截图像素坐标，再 computer_click(x=,y=)。' +
-      '实证依据：主模型整窗裸定位误差大（median>300px）不可依赖，目标主导的小裁剪定位误差 13-80px——裁剪务必让目标占画面主导。',
+      '实证依据：主模型整窗裸定位误差大（median>300px）不可依赖，目标主导的小裁剪定位误差 13-80px——裁剪务必让目标占画面主导。' +
+      '视觉断言通道提示：本工具为 JPEG 有损压缩，小字号数字常不可读（不可读即如实报 unknown）；文字类断言优先 screen_observe native（全窗无损 PNG，可读性最佳）。',
     parameters: {
       pid: { type: 'integer', description: '可选：目标窗口所属进程 pid（screen_observe 输出）；缺省按 window_id 解析。' },
       window_id: { type: 'integer', required: true, description: '目标窗口 id（screen_observe 或 app_list 输出）。' },
@@ -424,7 +436,8 @@ function registerOpsTools(ctx, cfg, wrap, opsState) {
     description:
       '确定性验证：对目标窗口求值 1-8 条结构化谓词（AND），驱动走 UIA 树判定 satisfied / unsatisfied / unknown。' +
       'unknown（元素缺失/树不完整）永不视为成功——fail-closed。动作后用它断言状态变化（如"对话框已出现""按钮已选中""输入框值=…"），' +
-      '代替"再截一张图自己猜"。每次验证是一次完整 UIA 走查（秒级）。',
+      '代替"再截一张图自己猜"。每次验证是一次完整 UIA 走查（秒级）。' +
+      'AX 树不可用的表面（canvas/自绘）改用视觉断言：按 screen_observe 的视觉断言协议对 native 截图判定，unknown 永不视为成功。',
     parameters: { ...VERIFY_PARAMS, include_screenshot: { type: 'boolean', description: '可选：附最终窗口截图作为视觉证据（不参与判定）。' } },
     output: { ...OUT({ ...VERIFY_RESULT, image: IMAGE_FIELD.image }), render: renderWithImage },
     execute: wrap('computer_verify', (args) => verifyOnce(ctx, args)),
