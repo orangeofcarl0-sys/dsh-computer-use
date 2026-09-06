@@ -133,3 +133,22 @@
 - native 直读的"模型真正看到图"依赖 harness 运行时（附带的 app 内嵌 dsh 需含上述 harness 改动；用 dsh-src 源码构建的 dsh CLI 直接具备）
 - vision 观察者真实调用需 DEEPSEEK_API_KEY + 端点提供 `deepseek-v4-flash-vision-exp`
 - 截图超附件限额（5MB）时自动用引擎 `zoom` 降级 ≤500px JPEG（`nativeImage: auto/full/compact` 可调）
+
+---
+
+# Windows 运行时验证（2026-09-06/07 追加）
+
+> 环境：Windows 11 x64 · DPI 150% · harness web（dsh 消费 git+https 分支 HEAD）· cua-driver 0.23.2 daemon
+> 方法：隔离插件加载 + 真实驱动 + 探针窗口（脚本在 `dsv4fv-exp/`，不入库）；结果已录入 ROADMAP A/D
+
+| 验证 | 结果 | 证据 |
+|---|---|---|
+| A6 密码窗口端到端 | **9/9**：结构密码标记注记 / guard 结构位硬拒 / 普通框零误拒 / sidecar 时延 1.4-1.6s / zoom crop 元数据 | `a6-password-e2e.mjs`；顺带发现并修复标记坐标系错误（frame=屏幕px 直配，commit a1b1069） |
+| 快照新鲜度语义真机 | **4/4**：observe 出快照 id（s000000d4）/ 首写 confirmed+value_readback / 同快照二写出「快照一致性提示」注记（note 档）/ 密码框 guard 硬拒回归 | harness 会话实测（2026-09-07，commit f5f59e5） |
+| dsv4fv 通道（A1） | ax ✓ / native ✓（attachments 管线端到端，首 token 0.9s·116 tok/s）/ vision 观察者半通（dsv4fv 只出思考，GLM 兜底缺 key 优雅降级） | harness 会话实测 |
+| A4 运行时项 | 用户层覆盖退役 ✓ / driverAccess 完整 ✓ / crop 元数据 ✓ / L3 恢复=smoke 层 | dump-config + E2E |
+| A7 坐标语义 | 驱动 0.23.2 像素点击换算疑似 DPI 缺陷（契约与实测矛盾），插件层不可判定维持现状 | 六轮实验 `a7-*`，ROADMAP D |
+| A5 OCR 噪声 | 可读 PNG 证据上 dsv4fv 数字转述噪声≈0（93 位零错误）；zoom JPEG 对 ~13px 小字不可读；诚实拒答 2/2 | 七轮实验，PLAN-s3-model-verifier |
+| 上游反馈 | #3576（密码投影，已提）；#3586（树版本+条件请求）、#3587（干预信号）（2026-09-07 提） | trycua/cua |
+
+> 离线回归基线同步升级：posture 34 / tools 15 / delivery-chain 3 = **52 项**（I 系列覆盖新鲜度语义）。

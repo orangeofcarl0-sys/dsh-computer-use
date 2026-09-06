@@ -14,9 +14,9 @@
 | `lib/guard.js` | ~80 | 凭据硬保护（密码框）、极危注记、allowedApps 白名单 | snapshot |
 | `lib/human.js` | 120 | 虚拟光标轨迹/点击瞄准（windowLocalOf/screenPointOf） | cua / snapshot |
 | `lib/vision.js` | ~230 | native 直读 / dsv4fv 观察者 / GLM 兜底（env-only key） | node 内置 |
-| `lib/snapshot.js` | 77 | 单窗口快照 + TTL（引擎侧 element_token 双重校验） | — |
+| `lib/snapshot.js` | 132 | 单窗口快照 + TTL + 新鲜度语义（失效原因三分类 / supersession 门禁 / 消费与可疑标记；引擎侧 element_token 双重校验） | — |
 | `lib/attach.js` | 25 | 图片持久化统一出口（attachments.saveImage + 输出块装配） | — |
-| `tests/*.smoke.mjs` | 343 | 离线 stub 冒烟：tools(15) / posture(14) / delivery-chain(3) | — |
+| `tests/*.smoke.mjs` | ~430 | 离线 stub 冒烟：posture(34) / tools(15) / delivery-chain(3) | — |
 
 ## 2. 分层与依赖
 
@@ -39,7 +39,7 @@ graph LR
     ACT["actions.js + human.js<br/>10 个动作 · 光标瞄准"]
     OPS["ops.js<br/>verify / wait_for / clipboard<br/>menu / hover / stop-resume"]
     GUARD["guard.js<br/>凭据硬保护 · 极危注记"]
-    SNAP["snapshot.js<br/>单窗口快照 + TTL"]
+    SNAP["snapshot.js<br/>单窗口快照 + TTL + 新鲜度语义"]
     VIS["vision.js<br/>native / 观察者 / GLM 兜底"]
     ATTACH["attach.js<br/>图片持久化"]
     CUA["cua.js<br/>resolveBin · 会话 · 三级投递链"]
