@@ -28,6 +28,7 @@
 
 ## D. 驱动级缺口（插件无法包装，需上游）
 
+- **上游 issue 已提（2026-09-07，REVERSE 逆向合流）**：[#3586](https://github.com/trycua/cua/issues/3586) UI 树 revision + 条件请求（no_change 响应——落地后快照 TTL 可退役为上限保险、supersession 可升 enforce）；[#3587](https://github.com/trycua/cua/issues/3587) 结构化干预信号（光标位移探测/低级钩子事件——落地后快照 suspect 由真实干预驱动）。A7 坐标语义素材备而未提。
 - **坐标像素点击落点缺陷（0.23.2，A7 六轮实验）**：文档契约（click x/y = window-local PNG px）与实测行为矛盾——三种语义假设（screen/bounds-local/client-local）均有反例，落点疑似 DPI 混合换算（logical/physical 不一致）；foreground 恢复竞态使焦点类判定不可测。影响：zoom 定位环（像素路径）系统性误差（0.4.1 实测 13-80px 与原点向量同量级）。缓解：element 模式（token）为可靠主路径；像素动作依赖 unverifiable 注记 + 复观察。实验数据：`dsv4fv-exp/a7-*`
 - middle_click / triple_click / mouse_down-up（长按、精细拖拽分解）
 - 多显示器枚举与切换（get_screen_size 仅主屏）
