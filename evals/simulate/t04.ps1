@@ -2,19 +2,35 @@ param([string]$TaskId = '')
 . (Join-Path $PSScriptRoot '..\lib\common.ps1')
 $checks = @()
 try {
-  Get-Process -Name 'CalculatorApp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Milliseconds 500
-  # drive the real calculator via SendKeys (foreground, independent of the plugin)
-  Start-Process -FilePath 'calc.exe'
-  Start-Sleep -Seconds 3
+  $pid2 = Start-Calculator
+  if (-not $pid2) { Out-Finish -Ok $false -Checks @() -EnvError 'calculator window never appeared' -Kind 'simulate' }
   $sh = New-Object -ComObject WScript.Shell
-  $act = $sh.AppActivate('Calculator')
-  if (-not $act) { $act = $sh.AppActivate(0) }
-  Start-Sleep -Milliseconds 800
-  $sh.SendKeys('1234*5678=')
-  Start-Sleep -Seconds 2
-  $checks += (Add-Check 'calculator driven' $true 'keys sent: 1234*5678=')
-  Out-Finish -Ok $true -Checks $checks -Kind 'simulate'
+  $sent = $false
+  for ($i = 0; $i -lt 5 -and -not $sent; $i++) {
+    [void]$sh.AppActivate($pid2)
+    Start-Sleep -Milliseconds 700
+    $sh.SendKeys('1234*5678=')
+    Start-Sleep -Seconds 2
+    # read back the display via UIA; retry keys if empty/missing
+    try {
+      Add-Type -AssemblyName UIAutomationClient
+      $root = [System.Windows.Automation.AutomationElement]::RootElement
+      $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ApplicationFrameWindow')
+      $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)
+      $idCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CalculatorResults')
+      foreach ($w in $wins) {
+        $found = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $idCond)
+        if ($found.Count -gt 0) {
+          $name = [string]$found[0].Current.Name
+          $digits = ($name -replace '[^0-9]', '')
+          if ($digits -eq '7006652') { $sent = $true }
+          break
+        }
+      }
+    } catch {}
+  }
+  $checks += (Add-Check 'calculator driven with readback' $sent ('pid=' + $pid2))
+  Out-Finish -Ok $sent -Checks $checks -Kind 'simulate'
 } catch {
-  Out-Finish -Ok $false -Checks $checks -EnvError $_.Exception.Message -Kind 'simulate'
+  Out-Finish -Ok $false -Checks @() -EnvError $_.Exception.Message -Kind 'simulate'
 }

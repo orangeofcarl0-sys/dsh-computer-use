@@ -1,23 +1,24 @@
 # t01 · notepad-save
 
 - group: authored
-- difficulty: easy
-- tools: app_launch / screen_observe / computer_type / computer_key
+- **tier: smoke**（冒烟组：日常回归必跑）
+- tools: screen_observe / computer_type / computer_key / computer_verify
 - sandbox: `%USERPROFILE%\.dsh\s4-evals\t01\`
 - oracle: 目标文件存在 + 内容逐字匹配（CRLF 归一）
 
 ## Prompt
 
 <<<PROMPT
-请把下面两行文字原样保存为一个新文本文件（不要增删、修改任何字符）：
+当前已打开一个空白记事本窗口。请把下面两行文字原样输入进去（不要增删、修改任何字符）：
 
 S4-T01 line one.
 S4-T01 line two.
 
-保存位置：{task_dir}\target\note.txt
+然后保存到 {task_dir}\target\note.txt。
 PROMPT>>>
 
-## 备注
+## 优化记录（2026-09-09，基线后）
 
-- 插件无文件读写工具，GUI 是唯一路径，oracle 只看终态是安全的（全集同理，不再重复）。
-- 文件内容全 ASCII，规避记事本默认编码差异（Win11 UTF-8 vs 经典 ANSI）。
+- **预置**：setup 负责启动空白记事本（原来由 agent 启动）。
+- **保留**：文字输入、路径保存、内容判定的完整闭环。
+- **oracle 未改**。预计步数从 25 降到 ~15。

@@ -1,7 +1,47 @@
 # S4 评测回归（evals/）
 
 插件级回归评测：确定性 setup/oracle 的桌面任务，经 harness 真实会话执行，PowerShell oracle 记分。
-spec 见工作区 `PLAN-s4-eval-regression.md`（§3 两组结构、§6 AC、§8 拍板）。
+spec 见工作区 `PLAN-s4-eval-regression.md`（§3 两组结构、§6 AC、§8 拍板、§10 基线与分析）。
+
+## 任务集（2026-09-09 基线后重排：只留重要×快；重要但慢的做优化）
+
+**优化原则**：oracle 一律不改（判据不变才可跨版本比较），只把 setup **预置到决策点**——
+应用已开、目录已停、内容已载。被测能力保留，启动/导航/发现的探索成本砍掉。
+另加两层运行期加速：`--max-steps` 步数预算（快速失败）、推理档位对照（跑 Medium 档）。
+
+### 冒烟组 smoke（日常回归必跑，目标单条 ≤5min）
+
+| id | 任务 | 被测能力 | 预置 | 基线步数 |
+|---|---|---|---|---|
+| t01 | 记事本输入两行并保存 | type/key/save 闭环 | 空白记事本已开 | 25（试跑 pass） |
+| t04 | 计算器 1234×5678 | 多步操作 + UIA 数值断言 | 计算器已开 | 73（pass） |
+| t07 | 窗口最大化并保持 | 窗口控制 / perform_action | workfile 已开 | 14-18 |
+| wa2 | 设文件为隐藏（WAA 0c9d… 本地化） | 资源管理器属性操作 | 资源管理器已停在目标并选中文件 | 73（timeout，导航导致） |
+
+### 核心组 core（低频跑，重要但慢 → 已优化）
+
+| id | 任务 | 被测能力 | 预置 | 基线步数 |
+|---|---|---|---|---|
+| t03 | 资源管理器重命名文件 | 就地文件操作 | 资源管理器已停在目标目录 | 59（timeout） |
+| t05 | 另存为 + ANSI 编码 | **另存为对话框/编码下拉（最大缺口）** | 源文件已用记事本打开 | 50（timeout） |
+| t06 | 剪贴板粘贴保存 | 剪贴板链路 | 剪贴板已置 + 空白记事本已开 | 57（timeout） |
+| t09 | 画图填充纯红并保存 | 图形表面 + 像素级 oracle | 画图已开 | 57（timeout） |
+| t10 | 两文档内容互换 | **多文档/多窗口状态管理（最大缺口）** | 两文件已载入记事本 | 48（timeout） |
+
+### 退役（2026-09-09，git 历史可恢复）
+
+| id | 退役理由 |
+|---|---|
+| t02 find-replace | 与 t01 同表面（记事本+保存），查找替换价值中低 |
+| t08 run-dialog | 启动通道 oracle 不可判定，且与 t01 重复 |
+| wa1 archive-docx | 与 t03 同表面（资源管理器文件操作），多文件操作非独立能力 |
+| wa3 canvas-resize | 与 t09 重复（画布尺寸并入 t09） |
+| wa4 paint-save | 与 t09 重复（仅存在性判定，信息量最低） |
+| wa5 png-list | 与 t03/wa2 同表面（explorer 列举 + 写文件） |
+| wa6 calc-days | 与 t04 同表面（计算器），日期模式导航属噪声 |
+
+WAA 组由 6 条缩至 1 条（wa2）：基线显示两组同构失败（瓶颈在执行面而非任务措辞），
+保留 wa2 作 WAA 溯源代表并转入冒烟组。原 6 条的共同问题是“表面与自编组重复 + 需深层路径导航”。
 
 ## 目录约定
 
@@ -25,24 +65,48 @@ evals/
 - 沙箱根：`%USERPROFILE%\.dsh\s4-evals\<id>\`。任务涉及"Documents/Desktop/Pictures"的一律本地化为沙箱内对应子目录（防动用户真实文件），改动点记入任务 md 溯源说明。
 - 判定原则（不可妥协）：oracle 绝不用模型自评，全部 PS/Win32 确定性读；setup/oracle 与被测动作解耦（runner 直调）。
 
+## 环境知识（2026-09-08/09 实测，写脚本前先读）
+
+- **Win11 记事本会恢复上一会话**：`%LOCALAPPDATA%\Packages\Microsoft.WindowsNotepad_*\LocalState\TabState\*.bin` 让未保存标签在下次启动时复活——基线里“幽灵 notepad 窗口”与 t07 级联失败的真机制。`hygiene.ps1 -ClearNotepadTabState` 可清（**会丢未保存文档，含用户自己的，故须显式开启**）；默认只关窗口+报告。
+- **WinUI3 应用 `MainWindowHandle` 恒为 0**（计算器实证）：就绪判定用 UIA（`Test-CalculatorVisible`/`Start-Calculator`），别用 MainWindowHandle。
+- **剪贴板可能被占用**：set 后立即 get 可能为空 → set+verify 重试（t06 setup 已实现）。
+- **打包应用重启竞态**：杀进程后要等它真正消失再启动，并带重试（`Start-Calculator`）。
+- **驱动提权窗口清理不掉**：cua-driver（疑似提权）spawn 的窗口，非提权侧 taskkill/Stop-Process/PostMessage 全失效（UIPI）；`Close-TaskWindows` 只能处理脚本自己启的窗口。这是当前最大的环境噪声源，修复项见 PLAN §10.5。
+- notepad 标签页控件类型是 **TabItem**（不是 ListItem）；窗口标题只显示活动标签。
+
+## 运行期语义（试跑定案 2026-09-07）
+
+- **prompt 统一前置约束**：仅图形界面完成 + 不向用户提问（runner 单点注入）。首次实跑发现：agent 会走文件写入工具直写沙箱（workspace-write 拒绝后**请求 danger-full-access 提权**，卡审批 15 分钟）——沙箱目录故意放在会话 workspace 之外，配合 runner 审批**自动拒绝**（>4 次拒绝记 error）把 agent 推回 GUI。
+- **回合结束判定**：页脚"N 轮 · M 步"计数 + 消息流静默 12s + 无停止按钮。发送按钮 disabled≠回合信号（它只是"输入框为空"）。
+- **超时**：默认 15 分钟/任务；打满预算判 timeout 且跳过 oracle（不进通过率分母）。
+- **发前安全闸**：新会话必须 0 轮，否则拒绝注入（HARDOFF §4-7）。
+- **回合在服务端继续**：runner 放弃后 agent 仍在跑——`maintain.mjs` 负责停"进行中"回合/拒绝审批；残留窗口由各 cleanup 的 `Close-TaskWindows` 收拾。
+- **计时**：轮次=页脚"N 轮"（1 轮会话也显示；"跳转到第 N 轮"按钮只在多轮会话出现，取 max）；步数="M 步"=工具调用数。
+
 ## 运行
 
 ```
-node evals/run.mjs --tasks t01,t02            # 跑指定任务
-node evals/run.mjs --group authored|waa|all   # 按组跑（缺省 all）
-node evals/run.mjs --model-label dsv4fv --dsh-url "<tokened URL>"
-node evals/verify-oracles.mjs                 # AC2：16 条 oracle 双向验证
+node evals/run.mjs --tasks t01,t04                    # 跑指定任务
+node evals/run.mjs --group authored|waa|all           # 按组跑（缺省 all）
+node evals/run.mjs --tier smoke                       # 只跑冒烟组（日常回归）
+node evals/run.mjs --max-steps 40 --timeout-min 8     # 快速模式：步数预算 + 墙钟兜底
+node evals/run.mjs --model-label dsv4fv-medium        # 档位对照（同样的集，换推理档）
+node evals/verify-oracles.mjs                         # AC2：全部 oracle 双向独立验证
+node evals/stop-stale.mjs "<url>" 18                  # 止损：停 >18min 的残留进行中回合
+node evals/maintain.mjs "<url>"                       # 停残留 + 拒绝待审批
 ```
 
 - `--dsh-url` 缺省调 `~/.dsh/restart-dsh-capture.ps1`（token 每次重启轮换，stdout 捕获至 `~/.dsh/web-latest.log`）。
 - 浏览器：本机 Chrome headless（`--remote-debugging-port`，零 npm 依赖）。
 - 报告：`dsv4fv-exp/s4-report-<date>.json`（真值产物不入库，AC5）；仓库只进 runner/任务/oracle。
+- **快速模式建议**：冒烟组用 `--tier smoke --max-steps 40 --timeout-min 8`（4 条约 15-25 分钟）；
+  核心组单独排期跑。
 
 ## 报告 schema
 
 ```json
 { "date", "model", "dshVersion", "pluginVersion",
-  "tasks": [{ "id", "group": "authored|waa", "waaId?", "sessionId",
+  "tasks": [{ "id", "group": "authored|waa", "tier": "smoke|core", "waaId?", "sessionId",
                "verdict": "pass|fail|timeout|error", "steps", "wallMs", "oracleDetail" }],
   "passRate": { "authored", "waa", "all" } }
 ```
@@ -51,15 +115,17 @@ node evals/verify-oracles.mjs                 # AC2：16 条 oracle 双向验证
 
 选集原则：本机已有内置应用、判定可 PS 确定性化、无网络依赖、不改动用户真实系统配置。
 判定只取原任务**意图**，实现一律重写为本仓库 PS oracle（原评测栈为 Python/pyautogui + 云端金标文件）。
+2026-09-09 起本组仅保留 wa2（见上方退役表）。
 
 | id | waaId | 原域 | 原 instruction 摘录 | 本地化改动 | 判定 |
 |---|---|---|---|---|---|
-| wa1 | 0c9dda13-428c-492b-900b-f48562111f93-WOS | file_explorer | Create a new folder named "Archive" in the Documents folder and move all .docx files into it. | Documents→沙箱目录；.docx 由 setup 本地生成（原为云端下载）；"全部 .docx"=setup 所置 3 个 | is_all_docx_in_archive 同义 PS 重写 |
-| wa2 | e27984c7-968c-48d7-b2c3-6e45cdcc5249-WOS | file_explorer | Set the file "secret.txt" in the Documents folder as hidden. | Documents→沙箱目录；文件本地生成 | is_file_hidden 同义 PS 重写 |
-| wa3 | 44dbac63-32bf-4cd2-81b4-ad6803ec812d-WOS | microsoft_paint | Change the canvas size to 800x600 pixels. | 原判定靠 postconfig 强存+读图；本地化：setup 置 300×200 小图并由任务提示打开，完成后另存为指定 png，oracle 读 PNG 尺寸 | 尺寸判定同义重写（800×600） |
-| wa4 | 3544ac9a-6aee-4a0b-a203-bc7b59b272b6-WOS | microsoft_paint | Save the Paint image as "circle.png" in the downloads folder | Downloads→沙箱目录；setup 置待存图 | vm_file_exists 同义重写 + PNG magic 校验 |
-| wa5 | 016c9a9d-f2b9-4428-8fdb-f74f4439ece6-WOS | file_explorer | Search for all files with the extension .png in the Pictures folder and list their full names in png_files.txt in the same folder. | Pictures→沙箱目录；png 由 setup 本地生成 | all_png_file_names 同义重写（集合匹配） |
-| wa6 | 28b91a24-5d97-4c2a-891c-dccbd3820c62-WOS-2 | windows_calc | ...how many days are between Jan 3, 2024 and Aug 20 2024? Save the result in a file called 'numdays.txt' on the Desktop (e.g. X days) | Desktop→沙箱目录；金标 "230 days" 由本地日历计算复核（2024-01-03→2024-08-20 = 230 天，非闰年争议日，PS 验证） | is_file_saved_desktop 同义重写 |
+| wa2 | e27984c7-968c-48d7-b2c3-6e45cdcc5249-WOS | file_explorer | Set the file "secret.txt" in the Documents folder as hidden. | Documents→沙箱目录；文件由 setup 本地生成；资源管理器预置停在目标并选中文件 | is_file_hidden 同义 PS 重写 |
+
+| id | waaId | 原域 | 原 instruction 摘录 | 本地化改动 | 判定 |
+|---|---|---|---|---|---|
+| wa2 | e27984c7-968c-48d7-b2c3-6e45cdcc5249-WOS | file_explorer | Set the file "secret.txt" in the Documents folder as hidden. | Documents→沙箱目录；文件本地生成；资源管理器预置停在目标并选中文件 | is_file_hidden 同义 PS 重写 |
+
+（其余 5 条 2026-09-09 退役，原定义见 git 历史；退役理由表在上方“退役”节。）
 
 ### 弃选留档（R6）
 

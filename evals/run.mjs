@@ -32,9 +32,11 @@ const arg = (name, dflt = undefined) => {
 const hasFlag = (name) => args.includes(`--${name}`)
 const tasksArg = arg('tasks', '')
 const groupArg = arg('group', 'all')
+const tierArg = arg('tier', 'all')
 const modelLabel = arg('model-label', 'dsv4fv')
 const dshUrlArg = arg('dsh-url', '')
-const timeoutMin = Number(arg('timeout-min', '5'))
+const timeoutMin = Number(arg('timeout-min', '15'))
+const maxSteps = Number(arg('max-steps', '0'))   // 0 = disabled; step budget for fast-fail runs
 const drySetup = hasFlag('dry-setup')
 const keepChrome = hasFlag('keep-chrome')
 
@@ -44,7 +46,7 @@ const keepChrome = hasFlag('keep-chrome')
 // Prepend (not append): models weight the top of the prompt; the constraint must
 // be read before the task. Sandbox dir is intentionally OUTSIDE the session
 // workspace so direct writes get denied -> denial feedback pushes back to GUI.
-const COMMON_CONSTRAINT = '【重要约束】本任务必须只通过图形界面完成（在屏幕上点击、拖拽、键盘输入）。禁止使用命令行/终端、文件写入工具或任何绕过屏幕的方式。\n\n'
+const COMMON_CONSTRAINT = '【重要约束】本任务必须只通过图形界面完成（在屏幕上点击、拖拽、键盘输入）。禁止使用命令行/终端、文件写入工具或任何绕过屏幕的方式。不要向用户提问；自主完成任务后直接结束回合。\n\n'
 
 // ---------- task discovery ----------
 function discoverTasks() {
@@ -58,9 +60,11 @@ function discoverTasks() {
     const m = md.match(/<<<PROMPT\n([\s\S]*?)\nPROMPT>>>/)
     if (!m) throw new Error(`task ${id}: no <<<PROMPT block`)
     const waaId = (md.match(/waaId:\s*`([^`]+)`/) || [])[1] || null
+    const tier = (md.match(/\*\*tier:\s*(\w+)\*\*/) || [])[1] || 'core'
+    if (tierArg !== 'all' && tier !== tierArg) continue
     const taskDir = join(homedir(), '.dsh', 's4-evals', id)
     const prompt = m[1].replaceAll('{task_dir}', taskDir)
-    ids.push({ id, group, waaId, prompt, taskDir })
+    ids.push({ id, group, tier, waaId, prompt, taskDir })
   }
   return ids
 }
@@ -174,10 +178,14 @@ const JS = {
     const cut = text.lastIndexOf('侧边对话(beta)');
     return JSON.stringify({ len: text.length, tail: (cut > 0 ? text.slice(0, cut) : text).slice(-500) });
   })()`,
-  sessionRef: (head) => `(() => {
-    const rows = [...document.querySelectorAll('.sessionRow, [class*="session" i]')];
-    const hit = rows.find(r => (r.textContent || '').includes(${JSON.stringify(head)}));
-    return hit ? (hit.textContent || '').slice(0, 120) : null;
+  // the just-created session is the most recent sidebar row (title is agent-generated)
+  sessionRef: `(() => {
+    const seen = new Set();
+    for (const el of document.querySelectorAll('div, li, a')) {
+      const t = (el.textContent || '').trim();
+      if (t && t.length < 120 && /(\\d+)\\s*(分钟|小时)/.test(t) && !seen.has(t)) return t.replace(/[\\n\\r]+/g, ' ');
+    }
+    return null;
   })()`,
 }
 
@@ -236,6 +244,7 @@ async function runTaskInSession(page, task, timeoutMin) {
   let lastTail = ''
   let quiet = 0
   let denials = 0
+  let stepCapHit = false
   let st = st0b
   const ring = []
   while (Date.now() < deadline) {
@@ -251,7 +260,8 @@ async function runTaskInSession(page, task, timeoutMin) {
       continue
     }
     if (ring.length > 40) ring.shift()
-    ring.push(`r=${st.rounds},s=${st.streaming},len=${tr.len}`)
+    ring.push(`r=${st.rounds},s=${st.streaming},len=${tr.len},st=${st.steps}`)
+    if (maxSteps > 0 && st.steps >= maxSteps) { stepCapHit = true; break }
     if (st.rounds >= 1 && tr.len === lastLen && tr.tail === lastTail) quiet += 1
     else { quiet = 0; lastLen = tr.len; lastTail = tr.tail }
     if (quiet >= 4 && !st.streaming) break
@@ -264,8 +274,21 @@ async function runTaskInSession(page, task, timeoutMin) {
     await page.evaluate(JS.denyApproval)
     await delay(1500)
   }
-  const verdict = st.rounds >= 1 ? 'ran' : 'timeout'
-  return { rounds: st.rounds, steps: st.steps, wallMs, model: st.model, replyTail: lastTail.slice(-400), verdict, ring: ring.join(' '), denials }
+  if (quiet < 4 || st.streaming) {
+    // budget exhausted: STOP the turn server-side, otherwise it keeps burning tokens (leak)
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(`(() => {
+        const b = [...document.querySelectorAll('button')].find(x => /停止|中断/.test(x.getAttribute('aria-label') || ''));
+        if (b && !b.disabled) { b.click(); return 'stopping'; }
+        return 'no-stop';
+      })()`)
+      await delay(2000)
+      const cur = JSON.parse(await page.evaluate(JS.sessionState))
+      if (!cur.streaming) break
+    }
+  }
+  const completed = quiet >= 4 && !st.streaming && st.rounds >= 1
+  return { rounds: st.rounds, steps: st.steps, wallMs, model: st.model, replyTail: lastTail.slice(-400), completed, stepCapHit, ring: ring.join(' '), denials }
 }
 
 // ---------- metadata ----------
@@ -309,7 +332,7 @@ try {
 
   for (const task of tasks) {
     console.log(`\n== ${task.id} (${task.group}${task.waaId ? ' · ' + task.waaId.slice(0, 8) : ''})`)
-    const rec = { id: task.id, group: task.group, waaId: task.waaId, sessionId: null, verdict: 'error', steps: 0, wallMs: 0, oracleDetail: null, notes: [] }
+    const rec = { id: task.id, group: task.group, tier: task.tier, waaId: task.waaId, sessionId: null, verdict: 'error', steps: 0, wallMs: 0, oracleDetail: null, notes: [] }
     const t0 = Date.now()
     try {
       const cl = await runPs('cleanup', task.id, 90000)
@@ -326,10 +349,12 @@ try {
         rec.model = run.model
         rec.replyTail = run.replyTail
         rec.denials = run.denials
-        try { rec.sessionId = await page.evaluate(JS.sessionRef(task.prompt.slice(0, 10))) } catch {}
-        if (run.verdict === 'timeout') {
+        try { rec.sessionId = await page.evaluate(JS.sessionRef) } catch {}
+        if (!run.completed) {
+          // budget exhausted (wall clock or step cap) without a quiet turn end:
+          // timeout, oracle is meaningless mid-flight
           rec.verdict = 'timeout'
-          rec.notes.push('turn did not finish in ' + timeoutMin + 'min; ring=' + (run.ring || '').slice(0, 400))
+          rec.notes.push((run.stepCapHit ? `step cap ${maxSteps} hit` : `turn not finished in ${timeoutMin}min`) + '; ring=' + (run.ring || '').slice(0, 400))
         } else {
           const orc = await runPs('oracle', task.id, 120000)
           rec.verdict = orc.code === 0 ? 'pass' : orc.code === 1 ? 'fail' : 'error'

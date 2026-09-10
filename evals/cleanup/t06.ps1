@@ -1,7 +1,7 @@
 param([string]$TaskId = '')
 . (Join-Path $PSScriptRoot '..\lib\common.ps1')
 try {
-  Set-Clipboard -Value ' '
+  Close-TaskWindows | Out-Null
   Remove-TaskDir
   Out-Finish -Ok $true -Checks @() -Kind 'cleanup'
 } catch {

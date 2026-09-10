@@ -136,3 +136,75 @@ function Get-Placement([int]$Hwnd) {
   [void][S4W32]::GetWindowPlacement([IntPtr]$Hwnd, [ref]$p)
   return $p
 }
+
+function Test-CalculatorVisible {
+  # Win11 Calculator is WinUI3: Process.MainWindowHandle stays 0 - probe UIA instead
+  try {
+    Add-Type -AssemblyName UIAutomationClient
+    $root = [System.Windows.Automation.AutomationElement]::RootElement
+    $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ApplicationFrameWindow')
+    $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)
+    $idCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CalculatorResults')
+    foreach ($w in $wins) {
+      $f = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $idCond)
+      if ($f.Count -gt 0) { return $true }
+    }
+  } catch {}
+  return $false
+}
+
+function Start-Calculator {
+  # kill any instance, wait until really gone, then launch with retries until UIA sees the window.
+  # Returns the CalculatorApp pid when visible, else $null.
+  Get-Process -Name 'CalculatorApp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  $deadline = (Get-Date).AddSeconds(8)
+  while ((Get-Date) -lt $deadline) {
+    if (-not (Get-Process -Name 'CalculatorApp' -ErrorAction SilentlyContinue)) { break }
+    Start-Sleep -Milliseconds 300
+  }
+  Start-Sleep -Milliseconds 800
+  $launched = $false
+  $deadline = (Get-Date).AddSeconds(30)
+  while ((Get-Date) -lt $deadline) {
+    if (-not (Get-Process -Name 'CalculatorApp' -ErrorAction SilentlyContinue)) {
+      Start-Process -FilePath 'calc.exe'
+      $launched = $true
+    }
+    if (Test-CalculatorVisible) {
+      $p = Get-Process -Name 'CalculatorApp' -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($p) { return $p.Id }
+      return 0
+    }
+    Start-Sleep -Milliseconds 600
+  }
+  return $null
+}
+
+function Close-TaskWindows {
+  # close notepad / explorer windows left by a task: untitled notepads + any window
+  # whose title contains 'Notepad'/'jishibench' (U+8BB0 U+4E8B U+672C) or one of the
+  # extra patterns (folder leaf names). Scoped by convention: dedicated eval box.
+  param([string[]]$Patterns = @())
+  $untitled = ([string][char]0x65E0) + ([string][char]0x6807) + ([string][char]0x9898)
+  $jishiben = ([string][char]0x8BB0) + ([string][char]0x4E8B) + ([string][char]0x672C)
+  $found = @()
+  foreach ($needle in (@('Notepad', $untitled, $jishiben) + $Patterns)) {
+    foreach ($w in @(Find-WindowsByTitle $needle)) { $found += ,@($w.hwnd, $w.title) }
+  }
+  $closed = 0
+  $seen = @{}
+  foreach ($e in $found) {
+    if ($seen.ContainsKey($e[0])) { continue }
+    $seen[$e[0]] = $true
+    [void][S4W32]::PostMessage([IntPtr]$e[0], 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+    $closed++
+  }
+  if ($closed -gt 0) { Start-Sleep -Milliseconds 800 }
+  # force-kill leftovers: WM_CLOSE on a modified untitled notepad pops a save dialog and stays
+  $needles = @('Notepad', $untitled, $jishiben) + $Patterns
+  Get-Process -Name 'Notepad' -ErrorAction SilentlyContinue | Where-Object {
+    $t = $_.MainWindowTitle
+    ($needles | Where-Object { $t -and $t.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -gt 0
+  } | Stop-Process -Force -ErrorAction SilentlyContinue
+  return $closed
+}

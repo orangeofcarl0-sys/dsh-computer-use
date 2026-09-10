@@ -47,7 +47,7 @@ const results = []
 let failed = 0
 for (const id of ORACLE_IDS) {
   const s = (k) => join(root, k, `${id}.ps1`)
-  const rec = { id, emptyFail: false, simPass: false, simRepeat: false, cleanupOk: false, envError: null, notes: [] }
+  const rec = { id, setupOk: false, emptyFail: false, simPass: false, simRepeat: false, cleanupOk: false, envError: null, notes: [] }
   const st = existsSync(s('setup'))
   const steps = [
     ['cleanup', s('cleanup'), 60],
@@ -64,6 +64,7 @@ for (const id of ORACLE_IDS) {
     const r = await runPs(script, id, to * 1000)
     const j = parseJson(r.out)
     if (name === 'oracle-empty') emptyCode = r.code
+    if (name === 'setup') rec.setupOk = r.code === 0
     if (name === 'oracle-pass') rec.simPass = r.code === 0
     if (name === 'oracle-pass-2') rec.simRepeat = r.code === 0
     if (name === 'cleanup') rec.cleanupOk = r.code === 0
@@ -71,14 +72,18 @@ for (const id of ORACLE_IDS) {
       rec.envError = `${name}: code=${r.code} ${(j?.envError || r.err || '').slice(0, 300)}`
       break
     }
-    if (r.code !== 0 && !['oracle-empty'].includes(name) && name !== 'cleanup') {
+    if (name === 'setup' && r.code !== 0) {
+      const jj = j || {}
+      rec.notes.push('setup did not reach ok: ' + JSON.stringify(jj.checks || jj.envError || r.code).slice(0, 240))
+    }
+    if (r.code !== 0 && !['oracle-empty', 'setup', 'cleanup'].includes(name)) {
       rec.notes.push(`${name}: code=${r.code} ${(r.err || '').slice(0, 200)}`)
     }
   }
   rec.emptyFail = emptyCode === 1
-  const ok = rec.emptyFail && rec.simPass && rec.simRepeat && rec.cleanupOk && !rec.envError
+  const ok = rec.setupOk && rec.emptyFail && rec.simPass && rec.simRepeat && rec.cleanupOk && !rec.envError
   if (!ok) failed++
-  console.log(`${ok ? 'PASS' : 'FAIL'} ${id} emptyFail=${rec.emptyFail} simPass=${rec.simPass} repeat=${rec.simRepeat} cleanup=${rec.cleanupOk}${rec.envError ? ' envError=' + rec.envError : ''}${rec.notes.length ? ' notes=' + rec.notes.join(' ; ') : ''}`)
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${id} setup=${rec.setupOk} emptyFail=${rec.emptyFail} simPass=${rec.simPass} repeat=${rec.simRepeat} cleanup=${rec.cleanupOk}${rec.envError ? ' envError=' + rec.envError : ''}${rec.notes.length ? ' notes=' + rec.notes.join(' ; ') : ''}`)
   results.push(rec)
 }
 

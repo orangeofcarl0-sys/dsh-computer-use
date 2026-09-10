@@ -1,9 +1,7 @@
 param([string]$TaskId = '')
 . (Join-Path $PSScriptRoot '..\lib\common.ps1')
 try {
-  $win = @(Find-WindowsByTitle 'workfile.txt')
-  foreach ($w in $win) { [void][S4W32]::PostMessage([IntPtr]$w.hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
-  Start-Sleep -Milliseconds 800
+  Close-TaskWindows @('workfile') | Out-Null
   Remove-TaskDir
   Out-Finish -Ok $true -Checks @() -Kind 'cleanup'
 } catch {
