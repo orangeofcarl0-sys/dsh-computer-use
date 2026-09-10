@@ -12,6 +12,19 @@ const chrome = await launchChrome()
 try {
   const page = await chrome.newPage(url, { waitMs: 8000 })
   await delay(2500)
+  // collapsed sidebar groups hide running turns from the row scan - expand them all first
+  for (let i = 0; i < 6; i++) {
+    const expanded = await page.evaluate(`(() => {
+      const els = [...document.querySelectorAll('div, li, a, button')];
+      for (const el of els) {
+        const t = (el.textContent || '').trim();
+        if (/^\\u5c55\\u5f00\\u5176\\u4f59\\s*\\d+\\s*\\u4e2a\\u4f1a\\u8bdd$/.test(t)) { el.click(); return 'expanded'; }
+      }
+      return 'none';
+    })()`)
+    if (expanded === 'none') break
+    await delay(1500)
+  }
   for (let round = 0; round < 12; round++) {
     const next = await page.evaluate(`(() => {
       const rows = [...document.querySelectorAll('div, li, a')];
