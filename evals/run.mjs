@@ -127,21 +127,37 @@ const JS = {
   })()`,
   // rounds: stats footer "N 轮" (present even for 1-round sessions; absent when 0).
   // jump buttons ("跳转到第 N 轮") only exist in multi-round sessions; max() covers both.
+  // rounds/steps: stats footer "N 轮 M 步" (dsh 0.1.5 dropped the middle dot; older
+  // builds render "N 轮 · M 步"). Take the LAST match in body text - sidebar rows of
+  // other sessions also contain round counts, and the footer is last in DOM order.
   sessionState: `(() => {
     const body = document.body.innerText || '';
     let rounds = 0; let steps = 0;
-    const rs = body.match(/(\\d+)\\s*轮\\s*·\\s*(\\d+)\\s*步/);
-    if (rs) { rounds = Number(rs[1]); steps = Number(rs[2]); }
+    const re = /(\\d+)\\s*轮\\s*(?:·\\s*)?(\\d+)\\s*步/g;
+    let m; let last = null;
+    while ((m = re.exec(body)) !== null) last = m;
+    if (last) { rounds = Number(last[1]); steps = Number(last[2]); }
     else {
-      const f = body.match(/(\\d+)\\s*轮(?!\\S)/);
-      if (f) rounds = Number(f[1]);
+      const singles = [...body.matchAll(/(\\d+)\\s*轮(?![^\\n]{0,8}步)/g)];
+      if (singles.length) rounds = Number(singles[singles.length - 1][1]);
     }
     const roundBtns = [...document.querySelectorAll('button')].map(b => b.getAttribute('aria-label') || '');
-    for (const l of roundBtns) { const m = l.match(/跳转到第\\s*(\\d+)\\s*轮/); if (m) rounds = Math.max(rounds, Number(m[1])); }
+    for (const l of roundBtns) { const mm = l.match(/跳转到第\\s*(\\d+)\\s*轮/); if (mm) rounds = Math.max(rounds, Number(mm[1])); }
     const composer = document.querySelector('[contenteditable="true"]');
     const model = (body.match(/选择模型，当前\\s*([^，,]+)/) || [])[1] || null;
     const stop = [...document.querySelectorAll('button')].some(b => /停止|中断|stop/i.test(b.getAttribute('aria-label') || ''));
     return JSON.stringify({ rounds, steps, hasComposer: !!composer, model, streaming: stop });
+  })()`,
+  focusComposer: `(() => {
+    const c = document.querySelector('[contenteditable="true"]');
+    if (!c) return 'no-composer';
+    c.focus();
+    document.execCommand('selectAll', false, null);
+    return 'focused';
+  })()`,
+  composerLen: `(() => {
+    const c = document.querySelector('[contenteditable="true"]');
+    return JSON.stringify({ clen: c ? c.textContent.length : -1 });
   })()`,
   typePrompt: (text) => `(() => {
     const composer = document.querySelector('[contenteditable="true"]');
@@ -199,6 +215,29 @@ async function waitComposerReady(page, timeoutMs = 20000) {
   throw new Error('composer never appeared')
 }
 
+/**
+ * Type into the composer. dsh 0.1.5 broke document.execCommand('insertText') on the
+ * composer (verified 2026-09-16: insertText yields textContent.length 0), so the
+ * primary path is CDP Input.insertText after focusing; execCommand stays as fallback.
+ */
+async function typePromptIntoComposer(page, text) {
+  const focused = await page.evaluate(JS.focusComposer)
+  if (focused !== 'focused') return 'no-composer'
+  try {
+    await page.send('Input.insertText', { text })
+  } catch (e) {
+    await page.evaluate(JS.typePrompt(text))
+  }
+  await delay(500)
+  let { clen } = JSON.parse(await page.evaluate(JS.composerLen))
+  if (clen < 20) {
+    await page.evaluate(JS.typePrompt(text))   // legacy fallback
+    await delay(500)
+    clen = JSON.parse(await page.evaluate(JS.composerLen)).clen
+  }
+  return 'typed:' + clen
+}
+
 async function newFreshSession(page) {
   const clicked = await page.evaluate(JS.clickNewSession)
   if (clicked !== 'clicked') throw new Error('new session click failed: ' + clicked)
@@ -227,13 +266,10 @@ async function runTaskInSession(page, task, timeoutMin) {
   await delay(800)
   const st0b = JSON.parse(await page.evaluate(JS.sessionState))
   if (st0b.rounds !== 0) throw new Error(`fresh session drifted: rounds=${st0b.rounds} (refusing to send)`)
-  const sendState = await page.evaluate(JS.typePrompt(COMMON_CONSTRAINT + task.prompt))
+  const sendState = await typePromptIntoComposer(page, COMMON_CONSTRAINT + task.prompt)
   if (!String(sendState).startsWith('typed:')) throw new Error('typing into composer failed: ' + sendState)
   await delay(600)
-  const typed2 = JSON.parse(await page.evaluate(`(() => {
-    const c = document.querySelector('[contenteditable="true"]');
-    return JSON.stringify({ clen: c ? c.textContent.length : -1 });
-  })()`))
+  const typed2 = JSON.parse(await page.evaluate(JS.composerLen))
   if (typed2.clen < 20) throw new Error('composer lost typed text: ' + JSON.stringify(typed2))
   const sent = await page.evaluate(JS.clickSend)
   if (sent !== 'sent') throw new Error('send failed: ' + sent)

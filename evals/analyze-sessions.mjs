@@ -8,7 +8,11 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import * as zlib from 'node:zlib'
 
-const base = join(homedir(), '.dsh', 'sessions', '--F-Codex_Work_Space-DSH~0020plugin-dsh-winui--')
+const sessionsRoot = join(homedir(), '.dsh', 'sessions')
+const wsArg = process.env.S4_WS || ''
+const base = wsArg
+  ? (wsArg.includes('\\') || wsArg.includes('/') ? wsArg : join(sessionsRoot, wsArg))
+  : join(sessionsRoot, '--F-Codex_Work_Space-DSH~0020plugin-dsh-winui--')
 const markers = process.argv.slice(2)
 
 function decompressFile(f) {
