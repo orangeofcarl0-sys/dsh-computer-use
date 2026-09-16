@@ -32,6 +32,19 @@
 - **hotkey 的 UIA 加速器超时**不再抛原始引擎错误，改为可执行指引（改用控件点击/稍后重试）——上游 [trycua/cua#3908](https://github.com/trycua/cua/issues/3908)。
 - verify-runtime 三处测试脆弱点：Windows 动态 import 需 `file://` URL、驱动自身窗口排除用了不存在的进程名（实际是 `cua-driver.exe`）、工具数断言写死 12-13（现改为下限 + 关键工具在册）。
 
+### 结构治理（2026-09-17 批次，P0/P1）
+
+代码屎山审计后的落地，全部以机械证据收口（parity 逐字节比对或测试断言），不含行为猜测。
+
+- **测试脚手架去重（P0-1）**：新增 `tests/lib/harness.mjs`（临时工作副本 / 可编程驱动桩 / 假 ctx·exec / 与 dsh 严格语义对齐的 schema 校验器 / 断言记录器），`schema.conformance`、`observe.dedup`、`task.tool` 三套测试改为引用，删掉各自复制的 ~90 行脚手架。
+- **schema 覆盖 13/20 → 20/20 工具（P0-3）**：22 → 42 场景，补齐 `computer_double_click`/`right_click`/`wait_for`/`hover`/`stop`/`resume`/`computer_task`（后者含结构化成功 / 无结构化 / 宿主无服务三形态），并按驱动真实形态补全"结构化拒绝"（`{refusal:{code}}`）场景矩阵——本项直接暴露并修掉了下面那条缺陷。
+- **配置接线测试（P0-2）**：新增 `tests/config.plumbing.mjs`——schema 键 ↔ `apply()` 组装的 cfg ↔ 实际读取点三向比对（含 `extremePatterns→extremeRes` 重命名白名单），外加 11 组行为哨兵（maxElements/observeDedup/verboseReceipts/supersession/ttlMs/deliveryMode/allowedApps/extremePatterns/cursorTheme/maxTaskCalls/visionProvider+nativeImage）；观测成本过高的 `passwordScan`/`taskTimeoutMin` 显式登记为静态兜底，不假装测过。
+- **删死代码（P0-4）**：`dedupInvalidate`（降噪失效已由"快照消费"闸门覆盖）、`taskCallCount`、`runAction`（被 humanAction 取代后无人调用）。
+- **拆超大函数（P1-5）**：`screenObserve`（194 行）→ 目标选择 / 抓树（含补抓与桌面降级短路）/ 结构性密码标记 / 元素映射 / 文本渲染 / 结果封装六个阶段函数；`screenZoom`（106 行）→ 目标解析 / 裁剪钳制 / 整窗回退。单函数 ≤66 行。**29 场景受控桩 parity 逐字节一致**。
+- **回执统一（P1-6）**：新增 `lib/receipt.js`（`receipt` / `refusalReceipt` / `settleAction`），点击/双击/右键/输入/按键/滚动/拖拽/菜单全部走同一出口——`scroll`/`drag` 从 JSON 内联改为紧凑回执（与 click 同形），"引擎拒绝"判断从 6 处收敛到 1 处（该类缺陷已在 menu/scroll/drag 三处实际发生过）。
+- **注册结构数据化（P1-7）**：四组工具改为返回定义数组的纯数据函数，注册与参数名登记收敛到 `apply()` 单处循环。**20 个工具的工具面 JSON 快照（描述/参数表/输出 schema/render/execute arity）逐字节一致**。如实说明：工具描述与 schema 是内容而非样板，`index.js` 体积基本未变（726→738 行），本项收益是"新增工具 = 加一项数据" + 工具面可机械校验。
+- **测试量**：`npm test` 148 断言（原 103）；真桌面闭环 `tests/live-action.e2e.mjs` 3 轮 30/30。
+
 ### Added（2026-09-16 批次）
 
 - **坐标换算基准元数据**：observe/zoom 输出 `screenOrigin`（= `list_windows` 的 bounds；实测截图与该 bounds 逐像素相同）+ `coordinateSpace`，使"图内像素 × crop.scale + crop 原点 + screenOrigin = 屏幕物理像素"可算（zoom 实测为恒定 1.2× 上采样，裁剪宽 ≤500px）。

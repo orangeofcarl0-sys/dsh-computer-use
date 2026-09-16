@@ -167,3 +167,15 @@
 | 客户端适配 | dsh 0.1.5：工具输出严格校验（已修 schema）、composer 输入法与页脚格式变化（runner 已适配）、新会话视图钉住（runner 自愈：重载客户端） |
 
 > 离线回归基线再升级：posture 34 / tools 15 / delivery-chain 3 / schema.conformance 22 = **74 项**。
+
+## 补充验证（2026-09-17，代码结构治理批）
+
+| 项 | 结果 |
+|---|---|
+| 插件自测套件 | `npm test` 七套共 **148 断言**全绿：posture 34 / tools 15 / delivery-chain 3 / **schema.conformance 20 工具 × 42 场景** / observe.dedup 13 / task.tool 16 / **config.plumbing 25** |
+| 真桌面动作闭环（改后复跑） | `tests/live-action.e2e.mjs` 3 轮 **30/30**（真实驱动、真实记事本：launch → observe(ax) → 文档元素 → type(effect:confirmed) → verify(title satisfied / 自输入文本 unknown) → 未知参数拒绝 → clipboard 往返 → wait → cleanup） |
+| observe/zoom 重构 parity | 29 场景受控桩（含 native/vision、降噪三档、桌面降级、zoom 无 bounds、zoom 失败整窗回退、无 attachments）{value, render} **逐字节一致** |
+| 工具面 parity | 20 工具的描述 / 参数表 / 输出 schema / render 存在性 / execute arity JSON 快照 **逐字节一致** |
+| 新发现并修复的缺陷 | schema 场景矩阵暴露 `scroll`/`drag` 把驱动的结构化拒绝（`{refusal:{code}}`）当成功上报——与 menu 同类缺陷，已收敛到 `lib/receipt.js` 单一出口；`runAction`/`dedupInvalidate`/`taskCallCount` 为死代码，已删 |
+
+> 证据生成方式（可复现）：工作区一次性探针 `_parity-observe.mjs`（observe/zoom 29 场景）与 `_tool-surface.mjs`（工具面），改前存基线、改后 diff，要求 diff 为空。
