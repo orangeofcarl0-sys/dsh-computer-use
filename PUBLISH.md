@@ -1,6 +1,6 @@
 # dsh-computer-use 发布清单（PUBLISH）
 
-> 状态更新：2026-09-17 · **v0.5.4 已发布**：`v0.3` 分支与默认分支 `main` 均指向 `b967698`，注解 tag `v0.5.4`（→ `b967698`）已推送。
+> 状态更新：2026-09-17 · **v0.5.4 已发布**：`v0.3` 与默认分支 `main` 均指向 `fc7aae2`；注解 tag `v0.5.4` 指向发布提交 `b967698`（其后一条 `fc7aae2` 只补发布记录文档）。
 > 发布前 check 全绿：`npm run check` / `npm test`（148 断言）/ `verify-runtime.mjs`（14/14）/ `tests/live-action.e2e.mjs`（23/23，重设计后）/
 > `evals/verify-oracles.mjs`（10/10，首次 t04 因遗留计算器窗口失败、清理后复跑通过）/ `npm pack --dry-run`（28 文件，无内部文档）。
 > npm 发布与 awesome 收录仍未做，见文末。
