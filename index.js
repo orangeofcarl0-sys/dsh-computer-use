@@ -120,6 +120,60 @@ const IMAGE_FIELD = {
 }
 
 /**
+ * 观测降级形态的公共字段：窗口级观测被拒时 desktopFallback() 返回这一组字段
+ * （window/elementCount/mode/elements/visualOnly/driverAccess）。观察类工具的
+ * output schema 必须同时声明它们——dsh 0.1.5 起对工具输出做严格校验
+ * （additionalProperties:false），未声明的降级回执会被判为非法输出而让整次调用失败
+ * （2026-09-16 实测：screen_zoom 降级路径直接报 invalid output）。
+ */
+const DESKTOP_FALLBACK_FIELDS = {
+  window: {
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          pid: { type: 'integer' }, windowId: { type: 'integer' },
+          app: { type: 'string' }, title: { type: 'string' },
+        },
+      },
+      { type: 'null' },
+    ],
+  },
+  elementCount: { type: 'integer' },
+  mode: { type: 'string' },
+  elements: {
+    type: 'array',
+    items: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        index: { type: 'integer' }, role: { type: 'string' },
+        label: { type: 'string' },
+        x: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+        y: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+      },
+    },
+  },
+  visualOnly: { type: 'boolean', description: 'true = 无可用 AX 树或已桌面级降级，仅视觉信息（不可直接用于坐标动作）。' },
+  driverAccess: {
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          elevated: { type: 'boolean' },
+          integrityLevel: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+          uia: { type: 'boolean' },
+          postMessage: { type: 'boolean' },
+        },
+      },
+      { type: 'null' },
+    ],
+  },
+}
+
+/**
  * S3a 视觉断言协议（模型侧验证器，PLAN-s3-model-verifier §4）。
  * 依据（A5 实证，2026-09-06）：可读 PNG 证据上数字转述噪声≈0（93 位零错误）；
  * zoom JPEG 对 ~13px 小字不可读（模型 2/2 诚实拒答）；同会话历史回声风险真实。
@@ -240,44 +294,9 @@ function registerObserveTools(ctx, cfg, wrap) {
       },
     },
     output: { ...OUT({
-      window: { type: 'object', additionalProperties: false, properties: {
-        pid: { type: 'integer' }, windowId: { type: 'integer' },
-        app: { type: 'string' }, title: { type: 'string' },
-      } },
-      elementCount: { type: 'integer' },
-      mode: { type: 'string' },
-      elements: {
-        type: 'array',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            index: { type: 'integer' }, role: { type: 'string' },
-            label: { type: 'string' },
-            x: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
-            y: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
-          },
-        },
-      },
+      ...DESKTOP_FALLBACK_FIELDS,
       screenshotFile: { oneOf: [{ type: 'string' }, { type: 'null' }] },
       snapshotId: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '本次观察的快照 id（动作可携带 snapshot_id 声明证据基线）。' },
-      visualOnly: { type: 'boolean', description: 'true = 无可用 AX 树或已桌面级降级，仅视觉信息（不可直接用于坐标动作）。' },
-      driverAccess: {
-        oneOf: [
-          {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              elevated: { type: 'boolean' },
-              integrityLevel: { oneOf: [{ type: 'string' }, { type: 'null' }] },
-              uia: { type: 'boolean' },
-              postMessage: { type: 'boolean' },
-            },
-          },
-          { type: 'null' },
-        ],
-        description: '附驱动权限面（cua-driver check_permissions 只读探测；探测失败为 null）。',
-      },
       ...IMAGE_FIELD,
     }), render: renderWithImage },
     execute: wrap('screen_observe', (args, cfg2, exec) => screenObserve(ctx, args, cfg2, exec)),
@@ -310,6 +329,8 @@ function registerObserveTools(ctx, cfg, wrap) {
         },
         description: '本图对应的整窗区域与换算比例（定位原语）。',
       },
+      // 降级路径（窗口级观测被拒 → desktopFallback）会回本组字段，schema 必须容纳
+      ...DESKTOP_FALLBACK_FIELDS,
       ...IMAGE_FIELD,
     }), render: renderWithImage },
     execute: wrap('screen_zoom', (args, cfg2, exec) => screenZoom(ctx, args, cfg2, exec)),
