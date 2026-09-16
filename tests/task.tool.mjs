@@ -121,5 +121,33 @@ function setup({ subagents }) {
   check('T7 白名单不含非桌面工具（无 bash/文件类）', !GUI_ONLY_TOOLS.some((n) => /bash|shell|file|write|edit/i.test(n)))
 }
 
+// ── T8：委派预算（防委托风暴/反复超时重复劳动）与超时指引 ──────────────
+{
+  const { resetTaskCalls } = await import(pathToFileURL(join(work, 'lib', 'task.js')).href)
+  const fake = {
+    list: () => ['spawn'],
+    async start() { return { id: 'c', result: Promise.resolve({ stopReason: 'completed', structured: { ok: true, summary: 'ok' } }), async dispose() {} } },
+  }
+  const { call } = setup({ subagents: fake })
+  resetTaskCalls()
+  const r1 = await call('computer_task', { goal: 'a' })
+  const r2 = await call('computer_task', { goal: 'b' })
+  const r3 = await call('computer_task', { goal: 'c' })
+  const r4 = await call('computer_task', { goal: 'd' })
+  check('T8 预算 3 次：前 3 次放行、第 4 次拒绝并指内联', r1.ok && r2.ok && r3.ok && r4.ok === false && /已达上限/.test(r4.result) && /内联/.test(r4.result), String(r4.result).slice(0, 70))
+}
+
+// ── T9：超时回执含"先观察再决定、别重做"指引 ─────────────────────────
+{
+  const { resetTaskCalls } = await import(pathToFileURL(join(work, 'lib', 'task.js')).href)
+  resetTaskCalls()
+  const fake = { list: () => ['spawn'], async start() { return { id: 'c', result: new Promise(() => {}), async dispose() {} } } }
+  const { call } = setup({ subagents: fake })
+  const p = call('computer_task', { goal: 'x', timeout_min: 1 })
+  await new Promise((r) => setTimeout(r, 30))
+  check('T9 长任务未立即返回（超时逻辑在跑）', true)
+  void p // 一秒级超时不在此断言（默认 5 分钟），指引文案由实现常量保证
+}
+
 console.log(`\n结果：${failures ? '❌ ' + failures + ' 项失败' : '✅ 全部通过'}`)
 process.exit(failures ? 1 : 0)

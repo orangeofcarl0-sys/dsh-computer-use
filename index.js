@@ -41,7 +41,7 @@ const defineTool = (options) => {
 }
 
 import { screenObserve, screenZoom, dedupReset } from './lib/observe.js'
-import { runComputerTask } from './lib/task.js'
+import { runComputerTask, resetTaskCalls } from './lib/task.js'
 import {
   click, doubleClick, rightClick, typeText, key, scroll, drag, wait, listApps, launchApp,
 } from './lib/actions.js'
@@ -66,8 +66,10 @@ export const Config = z.object({
   observeDedup: z.union(['brief', 'summary', 'off']).default('summary'),
   /** 回执详略：false（默认）动作回执只回一行要点；true 附原始 JSON 明细（排障用）。 */
   verboseReceipts: z.boolean().default(false),
-  /** computer_task 默认超时（分钟）；调用方可用 timeout_min 覆盖。 */
-  taskTimeoutMin: z.number().default(10),
+  /** computer_task 默认超时（分钟）；调用方可用 timeout_min 覆盖。实测：设太长会在子 agent 无法收敛时纯浪费（一次超时后父 agent 往往还要自己做一遍）。 */
+  taskTimeoutMin: z.number().default(5),
+  /** 每会话允许的 computer_task 次数上限（防委托风暴与反复超时重复劳动）。 */
+  maxTaskCalls: z.number().default(3),
   /** 区域限制：允许操作的应用名白名单（空 = 不限制）。 */
   allowedApps: z.array(z.string()).default([]),
   /** 虚拟光标主题 id（空 = 不设置，用引擎默认）。 */
@@ -658,12 +660,14 @@ function registerOpsTools(ctx, cfg, wrap, opsState) {
 
 export function apply(ctx, config) {
   dedupReset()   // 每次 apply 视为全新会话状态（降噪缓存随会话走，避免陈旧哈希被复用）
+  resetTaskCalls()   // 委派预算按会话重置
   const cfg = {
     ttlMs: config.ttlMs,
     maxElements: config.maxElements,
     observeDedup: config.observeDedup || 'summary',
     verboseReceipts: config.verboseReceipts === true,
     taskTimeoutMin: config.taskTimeoutMin,
+    maxTaskCalls: config.maxTaskCalls,
     supersession: config.supersession || 'note',
     allowedApps: Array.isArray(config.allowedApps) ? config.allowedApps : [],
     cursorTheme: config.cursorTheme,
