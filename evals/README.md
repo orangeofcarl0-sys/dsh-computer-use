@@ -76,6 +76,7 @@ evals/
 - **Win11 记事本上驱动的三条输入通道都可能不可达**（2026-09-16 受控窗口实测）：`hotkey` 走 UIA 加速器扫描 → 4s 超时（"a UIA provider in the target app is likely unresponsive"）；`press_key`（PostMessage）不报错但 `effect:unverifiable`、目标无反应；`invoke_menu` 返回 `menu_path_unavailable`（XAML 菜单驱动走不到）。→ 依赖 Ctrl+S 保存的任务（t01/t05/t06/t10）在该目标上会被驱动层挡住；可用替代是点击工具栏/菜单控件（element 编号点击），或换目标应用验证。插件已把 UIA 超时翻译成"改用点击控件"的可执行指引，并把驱动的 `refusal` 回执识别为失败（此前 menu 会把拒绝当成功上报）。
 - **记事本进程会被复用**：`notepad.exe` 单进程多标签，自己起的实例可能被用户后续打开的文件占用 → 清理测试窗口要按**标题**匹配，不要按进程名杀（2026-09-16 实测：我的测试进程被用户文档复用）。
 - **dsh 0.1.5 UI 变化（2026-09-16 实证）**：`document.execCommand('insertText')` 在 composer 上失效（长度恒 0，会发出空消息）→ 必须走 CDP `Input.insertText`；轮次页脚由 `N 轮 · M 步` 变为 `N 轮 M 步`（无分隔点）；新建会话后页面可能被其他会话视图覆盖 → 发送前必须**二次校验当前会话仍是 0 轮**，回合结束再校验 prompt 标记在活动会话文本里。
+- **「新建会话」点击可能不生效**（视图被钉在历史会话上；2026-09-16 实测：无弹层、无导航、harness 日志无报错，普通点击与 trusted CDP 点击都一样，而同一页面其它按钮点击正常）。**可靠恢复 = 重载客户端**——新加载会直接给出空会话（这也解释了为什么"重启/新开客户端"总能正常跑）。runner 已内置：点击无效 → 重载客户端 → 重试，最多 3 轮，并在日志打印 `session view pinned → reloading client`。
 
 ## 模型通道配置（opencode go 6649，2026-09-16）
 

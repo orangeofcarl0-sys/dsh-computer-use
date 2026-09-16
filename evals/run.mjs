@@ -251,17 +251,30 @@ async function typePromptIntoComposer(page, text) {
 }
 
 async function newFreshSession(page) {
-  const clicked = await page.evaluate(JS.clickNewSession)
-  if (clicked !== 'clicked') throw new Error('new session click failed: ' + clicked)
-  await delay(1200)
-  await waitComposerReady(page)
-  // SAFETY GATE: fresh session must have 0 rounds; refuse to send into a session with history
-  let lastState = null
-  for (let i = 0; i < 5; i++) {
-    lastState = JSON.parse(await page.evaluate(JS.sessionState))
-    if (lastState.rounds === 0) return lastState
-    await page.evaluate(JS.clickNewSession)
-    await delay(1800)
+  // 三种状态的实测行为（2026-09-16）：① 新客户端加载常直接得到空会话（最顺）；
+  // ② 头部「新建会话」通常能切到空会话；③ 视图被钉在历史会话时点击不生效（无弹层、无导航，
+  //    普通点击与 trusted CDP 点击都一样，但底部面板开关等其它按钮点击正常）。
+  // 对 ③ 的可靠恢复：重载页面——新加载会给出空会话。全过程都返回“是否需要重载”供报告记录。
+  let reloads = 0
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const clicked = await page.evaluate(JS.clickNewSession)
+    if (clicked !== 'clicked' && attempt === 0) throw new Error('new session click failed: ' + clicked)
+    await delay(1200)
+    await waitComposerReady(page)
+    // SAFETY GATE: 新会话必须 0 轮，否则拒绝注入（HARDOFF §4-7 教训）
+    let lastState = null
+    for (let i = 0; i < 3; i++) {
+      lastState = JSON.parse(await page.evaluate(JS.sessionState))
+      if (lastState.rounds === 0) { lastState.reloads = reloads; return lastState }
+      await page.evaluate(JS.clickNewSession)
+      await delay(1500)
+    }
+    // 视图被钉住：重载客户端再试
+    reloads += 1
+    console.log(`   ! session view pinned (rounds=${lastState?.rounds}) → reloading client (${reloads})`)
+    try { await page.send('Page.reload', {}) } catch {}
+    await delay(5000)
+    await waitComposerReady(page)
   }
   const ctx = await page.evaluate(`(() => {
     const b = (document.body.innerText || '');
@@ -269,7 +282,7 @@ async function newFreshSession(page) {
     for (const m of b.matchAll(/[\\s\\S]{0,25}\\d+\\s*轮[\\s\\S]{0,25}/g)) out.push(m[0].replace(/[\\n\\r]+/g, '|'));
     return JSON.stringify(out.slice(0, 6));
   })()`)
-  throw new Error(`fresh session check failed: rounds=${lastState?.rounds} ctx=${ctx}`)
+  throw new Error(`fresh session unavailable after clicks + ${reloads} reload(s): ${ctx}`)
 }
 
 /**
@@ -279,6 +292,15 @@ async function newFreshSession(page) {
  */
 async function ensureModel(page, modelText, effortText) {
   if (!modelText && !effortText) return null
+  // 先读标签：已符合目标配置就直接返回，不开菜单（少一层视图扰动，也更快）
+  const readNow = `(() => {
+    const b = [...document.querySelectorAll('button[aria-label]')].find(x => x.getAttribute('aria-label').includes('选择模型'));
+    return b ? b.getAttribute('aria-label') : null;
+  })()`
+  const label0 = await page.evaluate(readNow)
+  if (label0 && (!modelText || label0.includes(modelText)) && (!effortText || new RegExp(`推理等级\\s*${effortText}`, 'i').test(label0))) {
+    return label0
+  }
   const openMenu = `(() => {
     const b = [...document.querySelectorAll('button[aria-label]')].find(x => x.getAttribute('aria-label').includes('选择模型'));
     if (!b) return 'no-btn';
@@ -311,8 +333,7 @@ async function ensureModel(page, modelText, effortText) {
     const r = await page.evaluate(clickItem(modelText))
     if (r !== 'clicked') console.log('   ! model entry not found:', modelText)
     await delay(1500)
-  }
-  if (effortText) {
+  }  if (effortText) {
     await page.evaluate(openMenu); await delay(1200)
     await page.evaluate(clickLabel('推理等级')); await delay(1600)
     let items = []
