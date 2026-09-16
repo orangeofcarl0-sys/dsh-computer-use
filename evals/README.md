@@ -73,6 +73,8 @@ evals/
 - **打包应用重启竞态**：杀进程后要等它真正消失再启动，并带重试（`Start-Calculator`）。
 - **驱动提权窗口清理不掉**：cua-driver（疑似提权）spawn 的窗口，非提权侧 taskkill/Stop-Process/PostMessage 全失效（UIPI）；`Close-TaskWindows` 只能处理脚本自己启的窗口。这是当前最大的环境噪声源，修复项见 PLAN §10.5。
 - notepad 标签页控件类型是 **TabItem**（不是 ListItem）；窗口标题只显示活动标签。
+- **Win11 记事本上驱动的三条输入通道都可能不可达**（2026-09-16 受控窗口实测）：`hotkey` 走 UIA 加速器扫描 → 4s 超时（"a UIA provider in the target app is likely unresponsive"）；`press_key`（PostMessage）不报错但 `effect:unverifiable`、目标无反应；`invoke_menu` 返回 `menu_path_unavailable`（XAML 菜单驱动走不到）。→ 依赖 Ctrl+S 保存的任务（t01/t05/t06/t10）在该目标上会被驱动层挡住；可用替代是点击工具栏/菜单控件（element 编号点击），或换目标应用验证。插件已把 UIA 超时翻译成"改用点击控件"的可执行指引，并把驱动的 `refusal` 回执识别为失败（此前 menu 会把拒绝当成功上报）。
+- **记事本进程会被复用**：`notepad.exe` 单进程多标签，自己起的实例可能被用户后续打开的文件占用 → 清理测试窗口要按**标题**匹配，不要按进程名杀（2026-09-16 实测：我的测试进程被用户文档复用）。
 - **dsh 0.1.5 UI 变化（2026-09-16 实证）**：`document.execCommand('insertText')` 在 composer 上失效（长度恒 0，会发出空消息）→ 必须走 CDP `Input.insertText`；轮次页脚由 `N 轮 · M 步` 变为 `N 轮 M 步`（无分隔点）；新建会话后页面可能被其他会话视图覆盖 → 发送前必须**二次校验当前会话仍是 0 轮**，回合结束再校验 prompt 标记在活动会话文本里。
 
 ## 模型通道配置（opencode go 6649，2026-09-16）
