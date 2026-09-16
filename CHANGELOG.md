@@ -21,7 +21,7 @@
 
 - **observe 降噪**（工作区 PLAN-observe-noise，拍板 2026-09-16）：同一窗口 + 同一模式，且**上次观察后无任何动作**（快照未被消费）时，重复观察回极简回执——`observeDedup: summary`（默认，含"编号:角色"摘要）/ `brief`（单行）/ `off`（每次全量）；新增 `screen_observe(force=true)` 强制全量。判定用严格哈希并忽略时间/行列类噪声（实测：真实 35 元素记事本树 1586→250 字符，**降幅 84%**；brief 单行 95%）。注意本项省的是**上下文 token**，不减少工具调用步数（步速另由提示层"同一快照内无需重复观察"引导）。`maxElements` 默认 500→120（实测常见任务 30-70 个元素）。新增专项测试 `tests/observe.dedup.mjs`（13 断言：AC1 降幅 / AC2 变化必全量 / AC3 force / AC4 动作后必全量 / AC5 off 与 brief / D2 时间噪声）。
 
-- **上下文预算 A–F**（工作区 PLAN-context-budget，拍板 2026-09-16）：A 观察/缩放描述写入成本阶梯（ax < zoom ~200 tok < native ~3K tok）与用途对应；B schema 瘦身 **10176→9486 字符**；C 新增紧凑动作回执 + （正常路径 click 299→~90 字符，不可验证路径仍附明细）；D 树标签 100→48 字符 + 多行折首行；E  紧凑化 491→418 字符；F **新增第 20 个工具 **——把一段桌面操作委派给一次性子 agent（ +  限定 19 个桌面工具 +  强制 {ok,summary,evidence} +  + 超时），主上下文只吃一条 ≤400 字符回执，宿主无该能力时回委派配方。新增 （14 断言）并入 npm test（全库 101 断言）
+- **上下文预算 A–F**（工作区 PLAN-context-budget，拍板 2026-09-16）：A 观察/缩放描述写入成本阶梯（ax < zoom ~200 tok < native ~3K tok）与用途对应；B schema 瘦身 **10176→9486 字符**；C 新增紧凑动作回执 + `verboseReceipts`（正常路径 click 299→~90 字符，不可验证路径仍附明细）；D 树标签 100→48 字符 + 多行折首行；E `app_list` 紧凑化 491→418 字符；F **新增第 20 个工具 `computer_task`**——把一段桌面操作委派给一次性子 agent（`ctx.subagents` + `toolFilter` 限定 19 个桌面工具 + `outputSchema` 强制 {ok,summary,evidence} + `maxDepth=1` + 超时），主上下文只吃一条 ≤400 字符回执，宿主无该能力时回委派配方。新增 `tests/task.tool.mjs`（14 断言）并入 npm test（全库 101 断言）
 
 ### Fixed（2026-09-16 批次）
 
