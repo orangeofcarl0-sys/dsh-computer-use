@@ -11,7 +11,7 @@
  */
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { makeWorkCopy, loadPlugin, makeServices, makeCtx, makeChecks } from './lib/harness.mjs'
+import { makeWorkCopy, loadPlugin, makeServices, makeCtx, makeChecks, cleanupWork } from './lib/harness.mjs'
 
 const work = makeWorkCopy('task')
 const { check, state: checkState } = makeChecks()
@@ -132,4 +132,5 @@ function setup({ subagents }) {
 }
 
 console.log(`\n结果：${checkState.failures ? '❌ ' + checkState.failures + ' 项失败' : '✅ 全部通过'}`)
+if (!checkState.failures) cleanupWork(work)
 process.exit(checkState.failures ? 1 : 0)

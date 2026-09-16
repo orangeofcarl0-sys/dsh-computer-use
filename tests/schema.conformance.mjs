@@ -15,7 +15,7 @@
  */
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { makeWorkCopy, writeStubDriver, loadPlugin, makeServices, makeCtx, validateSchema } from './lib/harness.mjs'
+import { makeWorkCopy, writeStubDriver, loadPlugin, makeServices, makeCtx, validateSchema, cleanupWork } from './lib/harness.mjs'
 
 const work = makeWorkCopy('schema')
 
@@ -246,4 +246,5 @@ for (const r of results) {
   for (const i of r.issues || []) console.log('   - ' + i)
 }
 console.log(`\n结果：${results.filter((r) => r.ok).length}/${results.length} 场景通过`)
+if (!failures) cleanupWork(work)   // 通过即清工作副本（失败时留档排障）
 process.exit(failures ? 1 : 0)

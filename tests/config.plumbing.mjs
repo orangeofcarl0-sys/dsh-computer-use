@@ -16,7 +16,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { makeWorkCopy, writeStubDriver, loadPlugin, makeServices, makeCtx, makeChecks, repoRoot } from './lib/harness.mjs'
+import { makeWorkCopy, writeStubDriver, loadPlugin, makeServices, makeCtx, makeChecks, cleanupWork, repoRoot } from './lib/harness.mjs'
 
 const work = makeWorkCopy('config')
 
@@ -292,4 +292,5 @@ const observeArgs = { window: '4242', mode: 'ax' }
 }
 
 console.log(`\n结果：${state.failures ? '❌ ' + state.failures + ' 项失败' : '✅ 全部通过'}`)
+if (!state.failures) cleanupWork(work)
 process.exit(state.failures ? 1 : 0)
