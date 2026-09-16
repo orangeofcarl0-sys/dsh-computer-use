@@ -9,38 +9,20 @@
  *  T6 不支持 toolFilter/outputSchema 的宿主 → 自动降级重试并注明
  *  T7 toolFilter 白名单与注册工具集一致（防拼错工具名导致子 agent 被限死）
  */
-import { mkdtempSync, cpSync, writeFileSync, mkdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { makeWorkCopy, loadPlugin, makeServices, makeCtx, makeChecks } from './lib/harness.mjs'
 
-const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const workRoot = join(root, '.dsh-test')
-mkdirSync(workRoot, { recursive: true })
-const work = mkdtempSync(join(workRoot, 'task-'))
-cpSync(join(root, 'lib'), join(work, 'lib'), { recursive: true })
-cpSync(join(root, 'index.js'), join(work, 'index.js'))
+const work = makeWorkCopy('task')
+const { check, state: checkState } = makeChecks()
 
-let failures = 0
-const check = (name, ok, detail = '') => { if (!ok) failures++; console.log(`${ok ? '✅' : '❌'} ${name}${detail ? ' — ' + detail : ''}`) }
-
-const plugin = (await import(pathToFileURL(join(work, 'index.js')).href)).default
+const plugin = await loadPlugin(work)
 const { GUI_ONLY_TOOLS, DELEGATION_RECIPE } = await import(pathToFileURL(join(work, 'lib', 'task.js')).href)
 
 function setup({ subagents }) {
-  const reg = new Map()
-  const services = {
-    attachments: {
-      imageLimits: { maxImageBytes: 5e6, maxImagePixels: 4e7, maxImagesPerMessage: 20, maxMessageImageBytes: 1e8, mediaTypes: ['image/png'] },
-      async saveImage(i) { return { attachmentId: 'sha256:' + '6'.repeat(64), mediaType: i.mediaType, bytes: i.data.byteLength, width: 1, height: 1, name: i.name } },
-      async validateImage() {}, async readImage(r) { return { ref: r, data: new Uint8Array([1]) } },
-    },
-    llm: { async resolveModelInfo(p, m) { return { provider: p, id: m, inputModalities: ['text'] } }, async * stream() { throw new Error('stub') } },
-    approval: { async request() { return 'allowed-once' } },
-  }
-  if (subagents) services.subagents = subagents
-  const ctx = { get: (n) => services[n], logger: { info() {}, error() {} }, tools: { register(d) { reg.set(d.name, d); return () => reg.delete(d.name) } }, toolsRuntime: null }
+  const overrides = subagents ? { subagents } : {}
+  const { reg, ctx, exec } = makeCtx({ services: makeServices(overrides), agent: { id: 'parent-agent' } })
   plugin.apply(ctx, { ttlMs: 60000, maxElements: 120, deliveryMode: 'auto', passwordScan: 'off' })
-  const exec = { agent: { id: 'parent-agent' }, signal: new AbortController().signal, get signalSet() { return true } }
   return { call: (name, args) => reg.get(name).execute(args, exec), reg }
 }
 
@@ -149,5 +131,5 @@ function setup({ subagents }) {
   void p // 一秒级超时不在此断言（默认 5 分钟），指引文案由实现常量保证
 }
 
-console.log(`\n结果：${failures ? '❌ ' + failures + ' 项失败' : '✅ 全部通过'}`)
-process.exit(failures ? 1 : 0)
+console.log(`\n结果：${checkState.failures ? '❌ ' + checkState.failures + ' 项失败' : '✅ 全部通过'}`)
+process.exit(checkState.failures ? 1 : 0)

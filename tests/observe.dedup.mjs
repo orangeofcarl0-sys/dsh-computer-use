@@ -11,19 +11,14 @@
  *
  * 运行：node tests/observe.dedup.mjs
  */
-import { mkdtempSync, cpSync, writeFileSync, mkdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { makeWorkCopy, writeStubDriver, loadPlugin, makeCtx, makeChecks } from './lib/harness.mjs'
 
-const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const workRoot = join(root, '.dsh-test')
-mkdirSync(workRoot, { recursive: true })
-const work = mkdtempSync(join(workRoot, 'dedup-'))
-cpSync(join(root, 'lib'), join(work, 'lib'), { recursive: true })
-cpSync(join(root, 'index.js'), join(work, 'index.js'))
+const work = makeWorkCopy('dedup')
 
 // 受控引擎：元素集合由环境变量驱动，可注入"标题变化"/"元素变化"/"仅时间文本变化"
-writeFileSync(join(work, 'lib', 'cua.js'), `
+writeStubDriver(work, `
 export const CUA_BIN = 'stub'
 export const CUA_SESSION = 'dedup'
 export const withSession = (a = {}) => a
@@ -62,29 +57,9 @@ export async function cuaCall(tool, args = {}) {
 }
 `)
 
-const { default: plugin } = await import(pathToFileURL(join(work, 'index.js')).href)
+const plugin = await loadPlugin(work)
 
-function makeCtx() {
-  const services = {
-    attachments: {
-      imageLimits: { maxImageBytes: 5e6, maxImagePixels: 4e7, maxImagesPerMessage: 20, maxMessageImageBytes: 1e8, mediaTypes: ['image/png'] },
-      async saveImage(i) { return { attachmentId: 'sha256:' + 'f'.repeat(64), mediaType: i.mediaType, bytes: i.data.byteLength, width: 1, height: 1, name: i.name } },
-      async validateImage() {}, async readImage(r) { return { ref: r, data: new Uint8Array([1]) } },
-    },
-    llm: { async resolveModelInfo(p, m) { return { provider: p, id: m, inputModalities: ['text', 'image'] } }, async * stream() { throw new Error('stub') } },
-    approval: { async request() { return 'allowed-once' } },
-  }
-  const reg = new Map()
-  const ctx = { get: (n) => services[n], logger: { info() {}, error() {} }, tools: { register(d) { reg.set(d.name, d); return () => reg.delete(d.name) } }, toolsRuntime: null }
-  const exec = { agent: { options: { provider: 'p', model: 'm' }, session: { requestHeader: () => ({ config: { provider: 'p', model: 'm' } }) } }, signal: new AbortController().signal, get signalSet() { return true } }
-  return { reg, ctx, exec }
-}
-
-let failures = 0
-const check = (name, ok, detail = '') => {
-  if (!ok) failures++
-  console.log(`${ok ? '✅' : '❌'} ${name}${detail ? ' — ' + detail : ''}`)
-}
+const { check, state: checkState } = makeChecks()
 const raw = (o) => o.result || ''
 const isStub = (o) => /状态未变/.test(raw(o))
 
@@ -160,5 +135,5 @@ for (const [mode, label] of [['elements', '元素集合变化'], ['title', '标�
     `动作后 len=${raw(o3).length} 再观察 len=${raw(o4).length}`)
 }
 
-console.log(`\n结果：${failures ? '❌ ' + failures + ' 项失败' : '✅ 全部通过'}`)
-process.exit(failures ? 1 : 0)
+console.log(`\n结果：${checkState.failures ? '❌ ' + checkState.failures + ' 项失败' : '✅ 全部通过'}`)
+process.exit(checkState.failures ? 1 : 0)

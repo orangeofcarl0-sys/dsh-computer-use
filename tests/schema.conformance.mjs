@@ -13,22 +13,14 @@
  *
  * 运行：node tests/schema.conformance.mjs
  */
-import { mkdtempSync, cpSync, writeFileSync, mkdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { makeWorkCopy, writeStubDriver, loadPlugin, makeServices, makeCtx, validateSchema } from './lib/harness.mjs'
 
-const root = dirname(dirname(fileURLToPath(import.meta.url)))
-// 工作目录放在仓库内（.dsh-test/ 已 gitignore）：index.js 需要 @deepseek-ai/schemastery，
-// 在仓库内才能沿目录树解析到仓库的 node_modules。
-const workRoot = join(root, '.dsh-test')
-mkdirSync(workRoot, { recursive: true })
-const work = mkdtempSync(join(workRoot, 'schema-'))
-cpSync(join(root, 'lib'), join(work, 'lib'), { recursive: true })
-cpSync(join(root, 'index.js'), join(work, 'index.js'))
+const work = makeWorkCopy('schema')
 
 // ── 可编程引擎桩：由 SCENARIO 决定各驱动工具的行为 ────────────────────
-writeFileSync(join(work, 'lib', 'cua.js'), `
+writeStubDriver(work, `
 export const CUA_BIN = 'stub-cua-driver'
 export const CUA_SESSION = 'schema'
 export const withSession = (a = {}) => a
@@ -37,16 +29,21 @@ export function isBackgroundUnavailable(value) { return Boolean(value && value.o
 export function isForegroundUnavailable(value) { return Boolean(value && value.ok === false && /前台|foreground/i.test(String(value.result || ''))) }
 export function isUnverified(value) { return Boolean(value && value.ok === false && /未验证|unverified/i.test(String(value.result || ''))) }
 export const calls = []
-export async function cuaDeliver(tool, payload, deliveryMode, opts = {}) { return cuaCall(tool, payload) }
+// 与真实 lib/cua.js 同形：动作链解构 { value, note }，桩返回裸值会让"引擎拒绝"形态测不到
+export async function cuaDeliver(tool, payload, deliveryMode, opts = {}) { return { value: await cuaCall(tool, payload), note: '' } }
 
 
 const PNG1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='
 
-const WINDOW = { pid: 4242, window_id: 77, app_name: 'Notepad', title: 'untitled - Notepad' }
+const WINDOW = {
+  pid: 4242, window_id: 77, app_name: 'Notepad', title: 'untitled - Notepad',
+  bounds: { x: 100, y: 100, width: 800, height: 600 },   // 坐标换算需要（屏幕原点）
+}
+// 驱动真实字段名是 element_index（observe 据此建快照编号）
 const ELEMENTS = [
-  { index: 0, role: 'Button', label: 'Save', x: 100, y: 200, width: 60, height: 24 },
-  { index: 1, role: 'Edit', label: 'text', x: 120, y: 300, width: 200, height: 30, value: 'hello' },
-  { index: 2, role: 'AXSecureTextField', label: 'password', x: 120, y: 360, width: 200, height: 30, value: '********' },
+  { element_index: 0, element_token: 'tok-0', role: 'Button', label: 'Save', x: 100, y: 200, width: 60, height: 24 },
+  { element_index: 1, element_token: 'tok-1', role: 'Edit', label: 'text', x: 120, y: 300, width: 200, height: 30, value: 'hello' },
+  { element_index: 2, element_token: 'tok-2', role: 'AXSecureTextField', label: 'password', x: 120, y: 360, width: 200, height: 30, value: '********' },
 ]
 
 export async function cuaCall(tool, args = {}) {
@@ -57,6 +54,15 @@ export async function cuaCall(tool, args = {}) {
     const err = new Error('cua-driver: engine refused (stub)')
     err.code = 'ENGINE_REFUSED'
     throw err
+  }
+  // 驱动以"结构化拒绝"表达的动作失败（真实形态：refusal 是对象，见 lib/engine.js）
+  if (SCENARIO === 'engine-refusal') {
+    if (tool === 'invoke_menu') return { refusal: { code: 'menu_path_unavailable', message: 'no such menu path (stub)' } }
+    return { refusal: { code: 'element_not_visible' }, delivery: { mode: 'background' } }
+  }
+  // 动作成功：真实驱动带 effect/delivery 字段（回执据此走紧凑形态）
+  if (['click', 'type_text', 'hotkey', 'press_key', 'scroll', 'drag', 'move_cursor'].includes(tool)) {
+    return { ok: true, effect: 'confirmed', delivery: { mode: 'background' } }
   }
   if (SCENARIO === 'window-denied' && (tool === 'get_window_state' || tool === 'zoom')) {
     throw new Error('window-level observation denied (stub)')
@@ -78,8 +84,15 @@ export async function cuaCall(tool, args = {}) {
       return { screenshot_png_b64: PNG1x1, screenshot_mime_type: 'image/png', screenshot_width: 2560, screenshot_height: 1600 }
     case 'zoom':
       return { screenshot_png_b64: PNG1x1, width: 200, height: 150 }
-    case 'verify_state':
-      return { satisfied: true, reason: 'label matched (stub)' }
+    case 'verify_state': {
+      // 驱动真实形态：status + stable + predicates[]（插件按 predicates 规范化，不看 satisfied 布尔）
+      const want = process.env.CUA_STUB_PREDICATE || 'satisfied'
+      return {
+        status: want,
+        stable: want === 'satisfied',
+        predicates: [{ index: 0, status: want, unknown_reason: want === 'unknown' ? 'element_not_found' : null, observed_json: JSON.stringify({ found: want === 'satisfied' }) }],
+      }
+    }
     case 'clipboard_read':
       return { text: 'stub-clipboard' }
     case 'get_cursor_position':
@@ -92,91 +105,47 @@ export async function cuaCall(tool, args = {}) {
 }
 `)
 
-const { default: plugin } = await import(pathToFileURL(join(work, 'index.js')).href)
+const plugin = await loadPlugin(work)
 
-// ── 严格 schema 校验（与 dsh 的 additionalProperties:false 语义对齐）────────
-function validate(schema, value, path = 'value', out = []) {
-  if (!schema || typeof schema !== 'object') return out
-  if (schema.oneOf) {
-    const ok = schema.oneOf.some((s) => validate(s, value, path, []).length === 0)
-    if (!ok) out.push(`${path}: does not match any oneOf branch`)
-    return out
-  }
-  const t = schema.type
-  const kind = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value
-  const typeOk =
-    !t ||
-    (t === 'object' && kind === 'object') ||
-    (t === 'array' && kind === 'array') ||
-    (t === 'string' && kind === 'string') ||
-    (t === 'boolean' && kind === 'boolean') ||
-    (t === 'integer' && kind === 'number' && Number.isInteger(value)) ||
-    (t === 'number' && kind === 'number') ||
-    (t === 'null' && kind === 'null')
-  if (!typeOk) { out.push(`${path}: expected ${t}, got ${kind}`); return out }
-  if (schema.enum && !schema.enum.includes(value)) out.push(`${path}: "${value}" not in enum ${JSON.stringify(schema.enum)}`)
-  if (t === 'object' && kind === 'object') {
-    const props = schema.properties || {}
-    for (const req of schema.required || []) {
-      if (!(req in value)) out.push(`${path}.${req}: required but missing`)
+// ── ctx 桩：走共享脚手架（tests/lib/harness.mjs）────────────────────────
+// computer_task 需要一个可用的 subagents 服务：按 subagentMode 返回三种形态。
+//   stub        正常：子会话返回结构化结果
+//   unstructured 子会话结束但没有结构化结果（应报失败并附末尾输出）
+//   none        宿主不提供 subagents 服务（应返回委派配方）
+let subagentMode = 'stub'
+const fakeSubagents = {
+  list: () => ['spawn'],
+  async start() {
+    const structured = subagentMode === 'unstructured' ? null : { ok: true, summary: 'stub 完成', evidence: ['stub 证据'] }
+    return {
+      id: 'child-stub',
+      localAgent: {},
+      result: Promise.resolve({ stopReason: 'completed', structured, text: '子 agent 末尾输出（stub）' }),
+      async dispose() {},
     }
-    if (schema.additionalProperties === false) {
-      for (const k of Object.keys(value)) {
-        if (!(k in props)) out.push(`${path}.${k}: undeclared property (additionalProperties:false)`)
-      }
-    }
-    for (const [k, s] of Object.entries(props)) {
-      if (k in value) validate(s, value[k], `${path}.${k}`, out)
-    }
-  }
-  if (t === 'array' && kind === 'array' && schema.items) {
-    value.forEach((v, i) => validate(schema.items, v, `${path}[${i}]`, out))
-  }
-  return out
-}
-
-// ── ctx 桩（与真实宿主面等价的最小集合）────────────────────────────────
-const savedImages = []
-const services = {
-  attachments: {
-    imageLimits: { maxImageBytes: 5e6, maxImagePixels: 4e7, maxImagesPerMessage: 20, maxMessageImageBytes: 1e8, mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] },
-    async saveImage(input) {
-      const ref = { attachmentId: 'sha256:' + 'a'.repeat(64), mediaType: input.mediaType, bytes: input.data.byteLength, width: 1, height: 1, name: input.name }
-      savedImages.push(ref)
-      return ref
-    },
-    async validateImage() {},
-    async readImage(ref) { return { ref, data: new Uint8Array([1, 2, 3]) } },
   },
-  llm: {
-    async resolveModelInfo(provider, model) {
-      return { provider, id: model, inputModalities: ['text', 'image'] }
-    },
-    async * stream() { throw new Error('MISSING_CREDENTIAL (stub)') },
-  },
-  approval: { async request() { return 'allowed-once' } },
-}
-const registered = new Map()
-const ctx = {
-  get: (n) => services[n],
-  logger: { info() {}, error() {} },
-  tools: { register(def) { registered.set(def.name, def); return () => registered.delete(def.name) } },
-  toolsRuntime: null,
 }
 
-plugin.apply(ctx, { ttlMs: 60000, maxElements: 500, deliveryMode: 'auto', nativeImage: 'auto', passwordScan: 'off' })
+// 服务面按场景挂/摘（插件在调用时用 ctx.get 取服务，删键即为"宿主无此能力"）。
+const ctxServices = makeServices({ subagents: fakeSubagents })
+const { reg: registered, ctx, exec: baseExec } = makeCtx({
+  services: ctxServices,
+  agent: { options: { provider: 'p', model: 'm' }, session: { requestHeader: () => ({ config: { provider: 'p', model: 'm' } }) } },
+})
 
-const agent = {
-  options: { provider: 'p', model: 'm' },
-  session: { requestHeader: () => ({ config: { provider: 'p', model: 'm' } }) },
+function setServices(mode) {
+  subagentMode = mode
+  if (mode === 'none') delete ctxServices.subagents
+  else ctxServices.subagents = fakeSubagents
 }
+
+plugin.apply(ctx, { ttlMs: 60000, maxElements: 120, deliveryMode: 'auto', nativeImage: 'auto', passwordScan: 'off' })
 
 async function runTool(name, args) {
   const def = registered.get(name)
   if (!def) return { missing: true }
-  const exec = { agent, signal: new AbortController().signal, get signalSet() { return true } }
   try {
-    const value = await def.execute(args, exec)
+    const value = await def.execute(args, baseExec)
     return { value, def }
   } catch (err) {
     return { error: err.message, def }
@@ -199,7 +168,7 @@ const scenarios = [
   { name: 'click/no-snapshot', stub: 'ok', tool: 'computer_click', args: { x: 5, y: 5 } },
   { name: 'type/no-snapshot', stub: 'ok', tool: 'computer_type', args: { text: 'hi' } },
   { name: 'key/no-snapshot', stub: 'ok', tool: 'computer_key', args: { key: 'return' } },
-  { name: 'scroll/no-snapshot', stub: 'ok', tool: 'computer_scroll', args: { x: 5, y: 5, direction: 'down', amount: 3 } },
+  { name: 'scroll/no-snapshot', stub: 'ok', tool: 'computer_scroll', args: { element: 0, direction: 'down', amount: 3 } },
   { name: 'drag/no-snapshot', stub: 'ok', tool: 'computer_drag', args: { from_x: 1, from_y: 1, to_x: 9, to_y: 9 } },
   { name: 'wait/ok', stub: 'ok', tool: 'computer_wait', args: { ms: 50 } },
   { name: 'clipboard/read', stub: 'ok', tool: 'computer_clipboard', args: { action: 'read' } },
@@ -208,13 +177,37 @@ const scenarios = [
   { name: 'app_launch/ok', stub: 'ok', tool: 'app_launch', args: { app: 'notepad' } },
   { name: 'verify/ok', stub: 'ok', tool: 'computer_verify', args: { window_id: 77, expect: JSON.stringify([{ element: { selector: { role: 'Button', label_contains: 'Save' }, exists: true } }]) } },
   { name: 'verify/unknown', stub: 'ok', tool: 'computer_verify', args: { window_id: 77, expect: '不是json' } },
-  { name: 'menu/ok', stub: 'ok', tool: 'computer_menu', args: { window_id: 77, path: 'File' } },
+  { name: 'menu/ok', stub: 'ok', tool: 'computer_menu', args: { window_id: 77, path: JSON.stringify(['Save']) } },
   { name: 'click/driver-error', stub: 'driver-error', tool: 'computer_click', args: { x: 5, y: 5 } },
+  // 补齐覆盖：剩余 7 个工具（此前 22 场景只盖到 13 个工具）
+  { name: 'double_click/no-snapshot', stub: 'ok', tool: 'computer_double_click', args: { x: 5, y: 5 } },
+  { name: 'double_click/element', stub: 'ok', tool: 'computer_double_click', args: { element: 1 } },
+  { name: 'right_click/no-snapshot', stub: 'ok', tool: 'computer_right_click', args: { x: 5, y: 5 } },
+  { name: 'right_click/driver-error', stub: 'driver-error', tool: 'computer_right_click', args: { x: 5, y: 5 } },
+  { name: 'wait_for/satisfied', stub: 'ok', tool: 'computer_wait_for', args: { window_id: 77, timeoutMs: 300, expect: JSON.stringify([{ element: { selector: { role: 'Button', label_contains: 'Save' }, exists: true } }]) } },
+  { name: 'wait_for/timeout', stub: 'ok', predicate: 'unsatisfied', tool: 'computer_wait_for', args: { window_id: 77, timeoutMs: 200, pollMs: 100, expect: JSON.stringify([{ element: { selector: { role: 'Button', label_contains: 'Save' }, exists: true } }]) } },
+  { name: 'wait_for/bad-predicate', stub: 'ok', tool: 'computer_wait_for', args: { window_id: 77, timeoutMs: 200, expect: '不是json' } },
+  { name: 'hover/ok', stub: 'ok', tool: 'computer_hover', args: { x: 5, y: 5 } },
+  { name: 'hover/driver-error', stub: 'driver-error', tool: 'computer_hover', args: { x: 5, y: 5 } },
+  // 结构化拒绝（引擎以 {ok:false, refusal} 表达，回执必须报失败而不是成功）
+  { name: 'click/engine-refusal', stub: 'engine-refusal', tool: 'computer_click', args: { x: 5, y: 5 } },
+  { name: 'type/engine-refusal', stub: 'engine-refusal', tool: 'computer_type', args: { text: 'hi' } },
+  { name: 'key/engine-refusal', stub: 'engine-refusal', tool: 'computer_key', args: { key: 'return' } },
+  { name: 'scroll/engine-refusal', stub: 'engine-refusal', tool: 'computer_scroll', args: { element: 0, direction: 'down', amount: 3 } },
+  { name: 'drag/engine-refusal', stub: 'engine-refusal', tool: 'computer_drag', args: { from_x: 1, from_y: 1, to_x: 9, to_y: 9 } },
+  { name: 'menu/refusal', stub: 'engine-refusal', tool: 'computer_menu', args: { window_id: 77, path: JSON.stringify(['Save']) } },
+  // computer_task：三种返回形态（结构化成功 / 未返回结构化 / 宿主无 subagents 服务）
+  { name: 'stop/hit', stub: 'ok', tool: 'computer_stop', args: {} },
+  { name: 'resume/hit', stub: 'ok', tool: 'computer_resume', args: {} },
+  { name: 'task/structured', stub: 'ok', tool: 'computer_task', args: { goal: '打开记事本' }, subagents: 'stub' },
+  { name: 'task/no-structured', stub: 'ok', tool: 'computer_task', args: { goal: '打开记事本' }, subagents: 'unstructured' },
+  { name: 'task/no-service', stub: 'ok', tool: 'computer_task', args: { goal: '打开记事本' }, subagents: 'none' },
 ]
 
 // 让 observe 类工具拥有快照（动作工具需要新鲜快照才走到驱动层）
+// force=true：观察降噪默认开，重复观察会返回"状态未变"桩（元素集合为空）→ 编号查找会失败
 async function primeSnapshot() {
-  await runTool('screen_observe', { window: '4242', mode: 'ax' })
+  await runTool('screen_observe', { window: '4242', mode: 'ax', force: true })
 }
 
 let failures = 0
@@ -222,6 +215,8 @@ const results = []
 for (const sc of scenarios) {
   process.env.CUA_STUB_SCENARIO = sc.stub
   process.env.CUA_STUB_RELOAD = String(Date.now())
+  setServices(sc.subagents || 'stub')
+  process.env.CUA_STUB_PREDICATE = sc.predicate || 'satisfied'
   if (sc.tool !== 'screen_observe' && sc.tool !== 'screen_zoom' && !sc.name.startsWith('observe')) {
     await primeSnapshot()
   }
@@ -230,7 +225,7 @@ for (const sc of scenarios) {
   if (r.error) { results.push({ sc: sc.name, ok: true, note: 'threw: ' + String(r.error).slice(0, 80) }); continue }
   // 宿主校验的是经 JSON 传输后的值（undefined 键会在序列化时消失）——先往返一次再校验
   const wire = JSON.parse(JSON.stringify(r.value ?? null))
-  const issues = validate(r.def.output.schema, wire)
+  const issues = validateSchema(r.def.output.schema, wire)
   // render 必须产出内容块数组
   let renderOk = true
   try {
@@ -239,6 +234,7 @@ for (const sc of scenarios) {
   } catch (e) { renderOk = false; issues.push('render threw: ' + String(e.message).slice(0, 80)) }
   if (!renderOk) issues.push('render did not return content blocks')
   if (issues.length) failures++
+  if (process.env.CUA_SCHEMA_DUMP) console.log('   → ' + sc.name + ': ' + String(wire?.result || '').slice(0, 120).replace(/\n/g, ' ⏎ '))
   results.push({ sc: sc.name, ok: issues.length === 0, issues })
 }
 
