@@ -7,15 +7,16 @@
  * 运行：node /Users/Zhuanz/development/plugins/dsh-computer-use/verify-runtime.mjs
  */
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
-const { cuaCall } = await import(join(__dirname, 'lib/cua.js'))
-const plugin = (await import(join(__dirname, 'index.js'))).default
+// Windows 上动态 import 必须用 file:// URL（绝对路径 F:\... 会被 ESM 加载器拒绝）
+const { cuaCall } = await import(pathToFileURL(join(__dirname, 'lib/cua.js')).href)
+const plugin = (await import(pathToFileURL(join(__dirname, 'index.js')).href)).default
 
 // 不使用过期的硬编码 PID/window_id：每次运行从 cua-driver 发现一个真实可见窗口。
 const liveWindowList = await cuaCall('list_windows', { on_screen_only: true })
@@ -114,7 +115,16 @@ const config = {
 plugin.apply(ctx, config)
 
 // 断言工具注册 + 新能力
-check('插件注册 12-13 个工具', registered.size >= 12 && registered.size <= 13, `注册 ${registered.size} 个：${[...registered.keys()].join(', ')}`)
+// 工具数只做下限 + 关键工具在册（写死数量会在每次加工具时误报）
+const REQUIRED_TOOLS = [
+  'screen_observe', 'screen_zoom', 'computer_click', 'computer_double_click', 'computer_right_click',
+  'computer_type', 'computer_key', 'computer_scroll', 'computer_drag', 'computer_wait',
+  'app_list', 'app_launch', 'computer_verify', 'computer_wait_for', 'computer_clipboard',
+  'computer_menu', 'computer_hover', 'computer_stop', 'computer_resume',
+]
+const missingTools = REQUIRED_TOOLS.filter((t) => !registered.has(t))
+check(`插件注册 ≥${REQUIRED_TOOLS.length} 个工具且关键工具齐备`, registered.size >= REQUIRED_TOOLS.length && missingTools.length === 0,
+  `注册 ${registered.size} 个${missingTools.length ? '，缺: ' + missingTools.join(', ') : ''}`)
 const modeProp = registered.get('screen_observe').parameters?.properties?.mode
 check('screen_observe 含 native 模式', registered.has('screen_observe') && modeProp?.enum?.includes('native'), `mode enum: ${modeProp?.enum?.join('/')}`)
 check('screen_zoom 已注册', registered.has('screen_zoom'), '')

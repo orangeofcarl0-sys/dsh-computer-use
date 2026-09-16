@@ -46,7 +46,8 @@
     "verify-runtime.mjs"
   ],
   "scripts": {
-    "check": "node --check index.js && node --check lib/*.js && bash -n install.sh && bash -n uninstall.sh"
+    "check": "node tests/syntax.check.mjs",
+    "test": "node tests/posture.smoke.mjs && node tests/tools.smoke.mjs && node tests/delivery-chain.smoke.mjs && node tests/schema.conformance.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh-tools": "0.1.1-rc.2",
