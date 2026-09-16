@@ -11,6 +11,7 @@
 | `lib/actions.js` | 309 | 10 个动作工具实现（click/type/key/scroll/drag/wait/app_*） | cua / human / snapshot |
 | `lib/ops.js` | 180 | 确定性验证（verify/wait_for）、剪贴板、菜单直调、悬停、强杀锁存 | cua / snapshot / attach |
 | `lib/cua.js` | 221 | 驱动定位（resolveBin）、会话管理、**三级投递链 cuaDeliver**、错误规范化 | node 内置 |
+| `lib/engine.js` | ~40 | 驱动回执判定（共享）：`engineRefusal` 识别四种拒绝/失败形态（`refusal`/`effect`/`error`/`code`）、`uiaAcceleratorTimeout` 识别 UIA 加速器超时 | — |
 | `lib/guard.js` | ~80 | 凭据硬保护（密码框）、极危注记、allowedApps 白名单 | snapshot |
 | `lib/human.js` | 120 | 虚拟光标轨迹/点击瞄准（windowLocalOf/screenPointOf） | cua / snapshot |
 | `lib/vision.js` | ~230 | native 直读 / dsv4fv 观察者 / GLM 兜底（env-only key） | node 内置 |

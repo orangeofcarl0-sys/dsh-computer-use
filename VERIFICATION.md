@@ -152,3 +152,18 @@
 | 上游反馈 | #3576（密码投影，已提）；#3586（树版本+条件请求）、#3587（干预信号）（2026-09-07 提） | trycua/cua |
 
 > 离线回归基线同步升级：posture 34 / tools 15 / delivery-chain 3 = **52 项**（I 系列覆盖新鲜度语义）。
+
+## 补充验证（2026-09-16，dsh 0.1.5-rc.2 环境）
+
+| 项 | 结果 |
+|---|---|
+| 插件自测套件 | `npm test` 四套共 **74 断言**全绿（posture / tools / delivery-chain / **schema.conformance：19 工具 × 22 场景**，按声明 schema 严格校验所有返回形态） |
+| 真机运行时 | `verify-runtime.mjs` **12/12**（真实驱动：ax 观察 / native 直读 / zoom / vision 降级 / 坐标标注） |
+| 真桌面动作闭环 | `tests/live-action.e2e.mjs` 3 轮 **30/30**（launch → observe → type(effect:confirmed) → verify → clipboard → wait → cleanup） |
+| 坐标契约标定 | 可控探针逐点最小二乘 **残差 ≤0.55px**：`computer_click(x,y)` = 窗口矩形相对物理像素，`screen_observe` 元素坐标已换算到同一空间；截图 == `list_windows.bounds` 1:1（1906×1166 实测） |
+| 输入通道对照 | 经典 Win32（regedit `ctrl+f`）**3/3 送达**；WinUI3（记事本）`hotkey` **5/5 失败**（UIA 加速器 4s 超时）→ 上游 #3908 |
+| 驱动完整性级别 | `cua-driver.exe` 清单 `requireAdministrator` → daemon 与 `app_launch` 子进程均 **High IL**（对照：同一 shell 直起 notepad 为 Medium）→ 上游 #3607 已补对照实验与清理后果 |
+| S4 评测系统 | `evals/` 9 任务 + AC2 双向验证 **9/9**（连跑 3 次一致）；冒烟组在新通道下 t07 pass（8 步 / 117s） |
+| 客户端适配 | dsh 0.1.5：工具输出严格校验（已修 schema）、composer 输入法与页脚格式变化（runner 已适配）、新会话视图钉住（runner 自愈：重载客户端） |
+
+> 离线回归基线再升级：posture 34 / tools 15 / delivery-chain 3 / schema.conformance 22 = **74 项**。
