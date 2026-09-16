@@ -41,6 +41,7 @@ const defineTool = (options) => {
 }
 
 import { screenObserve, screenZoom, dedupReset } from './lib/observe.js'
+import { runComputerTask } from './lib/task.js'
 import {
   click, doubleClick, rightClick, typeText, key, scroll, drag, wait, listApps, launchApp,
 } from './lib/actions.js'
@@ -63,6 +64,10 @@ export const Config = z.object({
   maxElements: z.number().default(120),
   /** 重复观察降噪（同一未变窗口）：summary = 极简回执 + 上次元素摘要；brief = 只回一行；off = 每次都全量。 */
   observeDedup: z.union(['brief', 'summary', 'off']).default('summary'),
+  /** 回执详略：false（默认）动作回执只回一行要点；true 附原始 JSON 明细（排障用）。 */
+  verboseReceipts: z.boolean().default(false),
+  /** computer_task 默认超时（分钟）；调用方可用 timeout_min 覆盖。 */
+  taskTimeoutMin: z.number().default(10),
   /** 区域限制：允许操作的应用名白名单（空 = 不限制）。 */
   allowedApps: z.array(z.string()).default([]),
   /** 虚拟光标主题 id（空 = 不设置，用引擎默认）。 */
@@ -248,7 +253,7 @@ function renderWithImage(_args, value) {
 const FOREGROUND_PARAM = {
   foreground: {
     type: 'boolean',
-    description: '可选：本次动作强制前台投递（驱动短暂交换焦点后自动恢复原前台）。默认按 deliveryMode：background=不抢焦点 / auto=后台不可用时自动升级一次。',
+    description: '可选：强制前台投递（用后自动恢复原前台）；默认按 deliveryMode。',
   },
 }
 
@@ -256,15 +261,15 @@ const FOREGROUND_PARAM = {
 const TARGET_PARAMS = {
   element: {
     type: 'integer',
-    description: 'screen_observe 输出的元素编号（如 5）。与 x/y 二选一，优先。',
+    description: '元素编号（screen_observe 输出）；与 x/y 二选一，优先。',
   },
   x: {
     type: 'integer',
-    description: '窗口本地截图像素 x（screen_observe 的截图坐标系，模型所见即所点）。与 element 二选一。',
+    description: '截图物理像素 x（与 element 二选一）。',
   },
   y: {
     type: 'integer',
-    description: '窗口本地截图像素 y。',
+    description: '截图物理像素 y。',
   },
 }
 
@@ -272,7 +277,7 @@ const TARGET_PARAMS = {
 const SNAPSHOT_ID_PARAM = {
   snapshot_id: {
     type: 'string',
-    description: '可选：本动作基于的 screen_observe 快照 id（观察返回的 snapshotId，如 "s000000b2"）。与当前快照不一致时动作被拒（[snapshot_mismatch]），确保操作基于最新观察。',
+    description: '可选：本动作基于的快照 id（observe 的 snapshotId）；不一致则拒（[snapshot_mismatch]）。',
   },
 }
 
@@ -301,7 +306,7 @@ const VERIFY_PARAMS = {
   expect: {
     type: 'string',
     required: true,
-    description: '谓词数组 JSON（1-8 条，AND）。元素谓词：{"element":{"selector":{"role":"按钮","label_contains":"确定"},"exists":true,"enabled":true,"selected":null,"value_equals":null}}（exists 仅接受 true——absence 无法证明，缺失返回 unknown）；窗口谓词：{"window":{"exists":true,"bounds":{"x":0,"y":0,"width":100,"height":50,"tolerance_px":10}}}。',
+    description: '谓词数组 JSON（1-8 条，AND）。元素谓词：{"element":{"selector":{"role":"按钮","label_contains":"确定"},"exists":true}}（exists 仅接受 true；缺失返回 unknown）或 {"element":{"selector":{…},"enabled":true,"selected":null,"value_equals":null}}；窗口谓词：{"window":{"exists":true,"bounds":{"x":0,"y":0,"width":100,"height":50,"tolerance_px":10}}}。',
   },
 }
 
@@ -310,11 +315,13 @@ function registerObserveTools(ctx, cfg, wrap) {
   ctx.tools.register(defineTool({
     name: 'screen_observe',
     description:
-      '观察屏幕：对目标窗口生成"编号 + 控件 + 坐标"的界面树（AX 语义，零视觉 token 成本）。' +
-      '操作电脑前必须先调用本工具取得快照；之后用 computer_click(element=[编号]) 或 computer_click(x=,y=) 操作（坐标为窗口本地截图像素）。' +
-      'mode 选择：ax（默认，零成本树）/ vision（DeepSeek 视觉观察者结构化描述，免 ZHIPU key）/ native（截图直读，当前对话模型直接看图，需模型支持图片输入）。' +
-      'AX 树无法解析（游戏/Canvas/Electron）时自动降级：native（若当前模型支持图片）→ vision → ax。' +
-      '快照默认 60 秒过期，过期后需重新观察。' + S3_ASSERT_PROTOCOL,
+      '观察屏幕：生成目标窗口的"编号 + 控件 + 坐标"界面树（AX，零视觉成本）。动作前需先取得快照；' +
+      '坐标 = 窗口截图物理像素，与 computer_click 同空间，可直接传。' +
+      '成本阶梯（左低右高）：ax（纯文本）< screen_zoom 小裁剪(~200 tok) < native 整窗 PNG(~3K tok)——' +
+      '读文字用 native（无损），只判布局/找位置用 ax + screen_zoom，别为看布局付整窗 PNG 的钱。' +
+      'mode：ax（默认）/ vision（视觉观察者结构化描述）/ native（截图直读，需模型支持图片输入）；' +
+      'AX 树不可解析（游戏/Canvas/Electron）时自动降级 native→vision→ax。快照 60s 过期；' +
+      '界面未变时本工具回极简回执（force=true 强制全量）。' + S3_ASSERT_PROTOCOL,
     parameters: {
       window: {
         type: 'string',
@@ -351,11 +358,11 @@ function registerObserveTools(ctx, cfg, wrap) {
   ctx.tools.register(defineTool({
     name: 'screen_zoom',
     description:
-      '区域截图直读：裁剪窗口某块区域（截图像素坐标）为 ≤500px JPEG 并以图片返回，当前对话模型直接看图。' +
-      '两种用法：①"放大某块区域细看"（小字、图标、图表），图片 token 远小于整窗截图；' +
-      '②定位原语（树空/像素目标推荐路径）：在本图内语义确认目标后，取"图内坐标 × crop.scale + crop.x/y"得到整窗截图像素坐标，再 computer_click(x=,y=)。' +
-      '实证依据：主模型整窗裸定位误差大（median>300px）不可依赖，目标主导的小裁剪定位误差 13-80px——裁剪务必让目标占画面主导。' +
-      '视觉断言通道提示：本工具为 JPEG 有损压缩，小字号数字常不可读（不可读即如实报 unknown）；文字类断言优先 screen_observe native（全窗无损 PNG，可读性最佳）。',
+      '区域截图直读：把窗口某块区域裁成 ≤500px JPEG 交给模型看图（~200 tok，远低于整窗 PNG）。' +
+      '用法：①放大细看（小字/图标/图表）；②定位：图内坐标 × crop.scale + crop.x/y + screenOrigin = 屏幕物理像素。' +
+      '实证：整窗裸定位误差 median>300px 不可依赖，目标主导的小裁剪误差 13-80px——务必让目标占画面主导。' +
+      '视觉断言通道提示：本工具是有损 JPEG，小字号数字常不可读（不可读即如实报 unknown）；读文字请用 screen_observe native（无损 PNG）。'
+      + S3_ASSERT_PROTOCOL,
     parameters: {
       pid: { type: 'integer', description: '可选：目标窗口所属进程 pid（screen_observe 输出）；缺省按 window_id 解析。' },
       window_id: { type: 'integer', required: true, description: '目标窗口 id（screen_observe 或 app_list 输出）。' },
@@ -521,15 +528,53 @@ function registerActionTools(ctx, cfg, wrap) {
   }))
 }
 
+/** ── 委派组：computer_task（把一段桌面操作交给一次性子 agent，主上下文只吃一条结果） ── */
+function registerTaskTool(ctx, cfg, wrap) {
+  ctx.tools.register(defineTool({
+    name: 'computer_task',
+    description:
+      '把一段桌面操作委派给一次性子 agent：主上下文只收到一条紧凑结果（≤300 字 + 证据列表），'
+      + '中间的观察树/截图/回执都留在子上下文里随运行结束丢弃。适合"多步、过程噪声大"的操作'
+      + '（如"打开记事本把三行文字存到 X 路径""在资源管理器里把 A 移到 B"）。\n'
+      + '子 agent 被限定为只能用桌面工具（无命令行/文件直写），且必须以 JSON 收尾'
+      + '（{ok, summary, evidence}），宿主按 schema 校验。默认继承当前模型与推理档，可用 model / model_effort 降档。\n'
+      + '拿到结果后建议用 computer_verify 或 screen_observe 做一次廉价复核。'
+      + '宿主未提供子 agent 能力时本工具会返回委派配方（不执行操作）。',
+    parameters: {
+      goal: { type: 'string', required: true, description: '要完成的操作目标（含具体路径/名称等要素）。' },
+      success_criteria: { type: 'string', description: '可选：完成判据（子 agent 据此自评，并作为证据要求）。' },
+      constraints: { type: 'string', description: '可选：附加约束（如"不要改动其它文件""保留原窗口"）。' },
+      timeout_min: { type: 'integer', description: '可选：超时分钟数（默认 10，1-60）；到点取消子任务并返回失败。' },
+      model: { type: 'string', description: '可选：子 agent 使用的模型 id（默认继承当前）。' },
+      model_effort: { type: 'string', description: '可选：子 agent 推理档（如 low/medium/high；默认继承当前）。' },
+    },
+    output: OUT({
+      structured: {
+        oneOf: [
+          {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              ok: { type: 'boolean' },
+              summary: { type: 'string' },
+              evidence: { type: 'array', items: { type: 'string' } },
+            },
+          },
+          { type: 'null' },
+        ],
+      },
+    }),
+    execute: wrap('computer_task', (args, cfg2, exec) => runComputerTask(ctx, args, cfg2, exec)),
+  }))
+}
+
 /** ── 运营组：确定性验证 / 轮询 / 剪贴板 / 菜单 / 悬停 / 强杀 ── */
 function registerOpsTools(ctx, cfg, wrap, opsState) {
   ctx.tools.register(defineTool({
     name: 'computer_verify',
     description:
-      '确定性验证：对目标窗口求值 1-8 条结构化谓词（AND），驱动走 UIA 树判定 satisfied / unsatisfied / unknown。' +
-      'unknown（元素缺失/树不完整）永不视为成功——fail-closed。动作后用它断言状态变化（如"对话框已出现""按钮已选中""输入框值=…"），' +
-      '代替"再截一张图自己猜"。每次验证是一次完整 UIA 走查（秒级）。' +
-      'AX 树不可用的表面（canvas/自绘）改用视觉断言：按 screen_observe 的视觉断言协议对 native 截图判定，unknown 永不视为成功。',
+      '确定性验证：对目标窗口求值 1-8 条结构化谓词（AND），驱动走 UIA 判定 satisfied/unsatisfied/unknown；unknown 永不算成功（fail-closed）。' +
+      '动作后用它断言状态变化（对话框已出现/按钮已选中/值=…），代替再截图猜。canvas/自绘表面改用视觉断言（按 screen_observe 的视觉断言协议，unknown 永不视为成功）。',
     parameters: { ...VERIFY_PARAMS, include_screenshot: { type: 'boolean', description: '可选：附最终窗口截图作为视觉证据（不参与判定）。' } },
     output: { ...OUT({ ...VERIFY_RESULT, image: IMAGE_FIELD.image }), render: renderWithImage },
     execute: wrap('computer_verify', (args) => verifyOnce(ctx, args)),
@@ -617,6 +662,8 @@ export function apply(ctx, config) {
     ttlMs: config.ttlMs,
     maxElements: config.maxElements,
     observeDedup: config.observeDedup || 'summary',
+    verboseReceipts: config.verboseReceipts === true,
+    taskTimeoutMin: config.taskTimeoutMin,
     supersession: config.supersession || 'note',
     allowedApps: Array.isArray(config.allowedApps) ? config.allowedApps : [],
     cursorTheme: config.cursorTheme,
@@ -667,8 +714,9 @@ export function apply(ctx, config) {
   registerObserveTools(ctx, cfg, wrap)
   registerActionTools(ctx, cfg, wrap)
   registerOpsTools(ctx, cfg, wrap, opsState)
+  registerTaskTool(ctx, cfg, wrap)
 
-  ctx.logger?.info('dsh-computer-use: 19 个工具已注册（观察组 screen_observe/zoom · 动作组 computer_click/double/right/type/key/scroll/drag/wait + app_list/launch · 运营组 verify/wait_for/clipboard/menu/hover/stop/resume）')
+  ctx.logger?.info('dsh-computer-use: 20 个工具已注册（观察组 screen_observe/zoom · 动作组 computer_click/double/right/type/key/scroll/drag/wait + app_list/launch · 运营组 verify/wait_for/clipboard/menu/hover/stop/resume · 委派组 computer_task）')
 }
 
 export default { name, inject, Config, apply }
