@@ -21,7 +21,9 @@ const plugin = (await import(pathToFileURL(join(__dirname, 'index.js')).href)).d
 // 不使用过期的硬编码 PID/window_id：每次运行从 cua-driver 发现一个真实可见窗口。
 const liveWindowList = await cuaCall('list_windows', { on_screen_only: true })
 const testWindow = (liveWindowList.windows || []).find((w) =>
-  w.window_id && w.pid && w.app_name && !/^(Cua Driver|cua-driver|CursorUIViewService)$/i.test(w.app_name)
+  // 排除驱动自身与系统 shell 窗口：cua-driver 会拒绝观察自己的窗口
+  // （原正则只匹 "cua-driver"，实际进程名是 "cua-driver.exe" → 选中后必降级，造成假失败）
+  w.window_id && w.pid && w.app_name && !/cua[-_ ]?driver/i.test(w.app_name) && !/^(CursorUIViewService|ApplicationFrameHost|Windows Shell Experience Host)$/i.test(w.app_name)
 )
 if (!testWindow) throw new Error('verify-runtime: 当前没有可用于真实观察的可见窗口')
 const testWindowRef = String(testWindow.pid)

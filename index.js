@@ -23,7 +23,22 @@
  *     computer_stop 强杀锁存（computer_resume 唯一解锁）。
  */
 import z from '@deepseek-ai/schemastery'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool as rawDefineTool } from '@deepseek-ai/dsh-tools'
+
+/**
+ * defineTool 薄包装：登记每个工具的合法参数名。
+ *
+ * 为什么需要：宿主把参数表编译成 `{type:'object', properties, required}`——**不含**
+ * additionalProperties，于是模型传了拼错/外来的参数名时会被静默忽略，工具照常执行。
+ * 2026-09-16 实测踩坑：给 screen_observe 传 `app:'Notepad'`（该工具只有 `window`），
+ * 参数被丢弃 → 回退"z 序最前窗口" → 观察到了另一个应用的窗口，而不是目标窗口。
+ * 桌面自动化里静默选错目标代价很高，因此在 wrap() 里对未知参数直接拒绝并列明可接受参数。
+ */
+const toolParamNames = new Map()
+const defineTool = (options) => {
+  toolParamNames.set(options.name, Object.keys(options.parameters || {}))
+  return rawDefineTool(options)
+}
 
 import { screenObserve, screenZoom } from './lib/observe.js'
 import {
@@ -592,6 +607,17 @@ export function apply(ctx, config) {
     try {
       const denied = opsGate(opsState, toolName)
       if (denied) return { ok: false, result: `✗ ${denied}` }
+      // 未知参数拒发（宿主参数表不含 additionalProperties，写错的键会被静默忽略，
+      // 进而可能回退到非目标窗口/默认值——在桌面自动化里这是不可接受的静默错目标）
+      const allowed = toolParamNames.get(toolName) || []
+      const unknown = Object.keys(args || {}).filter((k) => !allowed.includes(k) && !k.startsWith('_'))
+      if (unknown.length) {
+        return {
+          ok: false,
+          result: `✗ 未知参数 ${unknown.join(', ')}（本工具接受：${allowed.length ? allowed.join(', ') : '无参数'}）。`
+            + '参数名不符的键会被静默丢弃并可能回退到默认目标，因此此处直接拒绝——请按上面列出的参数名重发。',
+        }
+      }
       const g = guard(cfg, toolName, args)
       if (!g.ok) return { ok: false, result: `✗ ${g.reason}` }
       const v = await impl(args, cfg, exec)
