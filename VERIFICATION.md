@@ -173,9 +173,11 @@
 | 项 | 结果 |
 |---|---|
 | 插件自测套件 | `npm test` 七套共 **148 断言**全绿：posture 34 / tools 15 / delivery-chain 3 / **schema.conformance 20 工具 × 42 场景** / observe.dedup 13 / task.tool 16 / **config.plumbing 25** |
-| 真桌面动作闭环（改后复跑） | `tests/live-action.e2e.mjs` 3 轮 **30/30**（真实驱动、真实记事本：launch → observe(ax) → 文档元素 → type(effect:confirmed) → verify(title satisfied / 自输入文本 unknown) → 未知参数拒绝 → clipboard 往返 → wait → cleanup） |
+| 真桌面动作闭环（发布前复跑） | `tests/live-action.e2e.mjs` **23/23**（重设计后：唯一命名临时文件窗口做确定性选择 → observe(ax) 找文档元素 → type(effect:confirmed) → **脚本自读 UIA 文档文本含标记（独立见证）** → window 谓词 satisfied / 自输入文本 unknown+untrusted_source → 未知参数拒绝 → clipboard 往返 → wait）。重设计原因：旧版用 'Notepad' 标题子串选窗口，桌面存在多个记事本（含用户文档与 UIA 树为空的残留窗口）时会选错而整轮失败 |
+| 清理立场（实测修正） | WinUI 记事本的窗口/标签**无法安全自动关闭**：按进程名杀会连带用户未保存文档、WM_CLOSE 先弹"另存为"（对话框 UIA 子树为空）、UIA `Invoke` "关闭标签页" 实测 no-op → e2e 与 `evals` 清理一律改为"如实报告残留、人工关闭"（详见 HANDOFF §7.6） |
 | observe/zoom 重构 parity | 29 场景受控桩（含 native/vision、降噪三档、桌面降级、zoom 无 bounds、zoom 失败整窗回退、无 attachments）{value, render} **逐字节一致** |
 | 工具面 parity | 20 工具的描述 / 参数表 / 输出 schema / render 存在性 / execute arity JSON 快照 **逐字节一致** |
+| S4 oracle 双向验证（发布前） | `evals/verify-oracles.mjs` **10/10**：首次跑 t04 失败（simulate 三次 code=1）——清理遗留的计算器窗口后复跑通过，属环境态问题（前置进程残留），非退归 |
 | 新发现并修复的缺陷 | schema 场景矩阵暴露 `scroll`/`drag` 把驱动的结构化拒绝（`{refusal:{code}}`）当成功上报——与 menu 同类缺陷，已收敛到 `lib/receipt.js` 单一出口；`runAction`/`dedupInvalidate`/`taskCallCount` 为死代码，已删 |
 
 > 证据生成方式（可复现）：工作区一次性探针 `_parity-observe.mjs`（observe/zoom 29 场景）与 `_tool-surface.mjs`（工具面），改前存基线、改后 diff，要求 diff 为空。

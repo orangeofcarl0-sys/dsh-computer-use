@@ -1,6 +1,8 @@
 # dsh-computer-use 发布清单（PUBLISH）
 
-> 状态更新：2026-09-17 · v0.5.4 发布执行中（GitHub：推送 `v0.3` + 注解 tag `v0.5.4` + 快进默认分支 `main`）。
+> 状态更新：2026-09-17 · **v0.5.4 已发布**：`v0.3` 分支与默认分支 `main` 均指向 `b967698`，注解 tag `v0.5.4`（→ `b967698`）已推送。
+> 发布前 check 全绿：`npm run check` / `npm test`（148 断言）/ `verify-runtime.mjs`（14/14）/ `tests/live-action.e2e.mjs`（23/23，重设计后）/
+> `evals/verify-oracles.mjs`（10/10，首次 t04 因遗留计算器窗口失败、清理后复跑通过）/ `npm pack --dry-run`（28 文件，无内部文档）。
 > npm 发布与 awesome 收录仍未做，见文末。
 
 ## 发布口径（2026-09-17 确立）
@@ -73,7 +75,7 @@ git ls-remote --tags origin | grep v0.5.4
 | topics | `dsh-plugin` + `deepseek-harness` + `computer-use` + `cua-driver` + `ai-agents` |
 | dsh-plugin topic 收录 | ✅ 已出现在 https://github.com/topics/dsh-plugin |
 | 内部项目书 | ✅ 已从远程移除（`dsh-computer-use.md` 在 .gitignore；⚠️ 首次提交的历史里仍有，介意需 filter-repo 重写） |
-| tag 历史 | v0.4.0 / v0.4.1 / v0.5.0 / v0.5.1 / v0.5.2 / v0.5.3 / **v0.5.4** |
+| tag 历史 | v0.4.0 / v0.4.1 / v0.5.0 / v0.5.1 / v0.5.2 / v0.5.3 / **v0.5.4**（均为注解 tag；仓库未使用 GitHub Releases 页面，PUBLISH 视其为可选项）|
 
 ## ⏳ 待做：npm 发布（dsh-market 安装途径）
 
