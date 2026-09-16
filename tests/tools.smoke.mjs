@@ -24,6 +24,7 @@ writeFileSync(join(work, 'lib', 'cua.js'), `
 export const CUA_SESSION = 'smoke'
 export const withSession = (a = {}) => a
 export function normalizeMcp(v) { return v }
+export function isUnverified() { return false }
 export const history = []
 export async function cuaCall(tool, args = {}) {
   history.push({ tool, args })

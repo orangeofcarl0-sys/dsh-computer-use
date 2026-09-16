@@ -194,13 +194,20 @@ let idOk = true
 try { snapMod.validateSnapshotId('s000000ac'); snapMod.validateSnapshotId(undefined) } catch { idOk = false }
 check('I8: snapshot_id 匹配/未提供照常', idOk)
 
-// I9: 执行侧接线（四条 mutate 路径 + observe 输出）
+// I9: 执行侧接线（快照基线校验 + 单一消费出口 + observe 输出）
+// 计数基线（2026-09-17 P1-6 统一回执后）：动作入口 3 处 validateSnapshotId（click/double/right 共用
+// humanAction）、5 处 freshnessGate；"判拒绝 + 标消费"收敛到 receipt.js 的 settleAction（4 处调用），
+// key 的 UIA 加速器超时特例单独走 refusalReceipt。
 const actionsSrc = readFileSync(join(root, 'lib', 'actions.js'), 'utf8')
 const observeSrc = readFileSync(join(root, 'lib', 'observe.js'), 'utf8')
-check('I9: 执行侧接线（validate/gate/consume 四路径 + observe.snapshotId）',
-  (actionsSrc.match(/validateSnapshotId\(args\.snapshot_id\)/g) || []).length >= 4
-  && (actionsSrc.match(/markConsumed\(/g) || []).length >= 4
+const receiptSrc = readFileSync(join(root, 'lib', 'receipt.js'), 'utf8')
+check('I9: 执行侧接线（validate/gate 入口 + settleAction 单一消费出口 + observe.snapshotId）',
+  (actionsSrc.match(/validateSnapshotId\(args\.snapshot_id\)/g) || []).length >= 3
   && (actionsSrc.match(/freshnessGate\(cfg\)/g) || []).length >= 4
+  && (actionsSrc.match(/settleAction\(/g) || []).length >= 4
+  && /markConsumed\(tool\)/.test(receiptSrc)
+  && /markSuspect\(tool\)/.test(receiptSrc)
+  && /refusalReceipt\('按键'/.test(actionsSrc)
   && /snapshotId: state\.snapshot_id/.test(observeSrc))
 
 process.exit(failures > 0 ? 1 : 0)
