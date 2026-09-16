@@ -181,10 +181,17 @@ function Start-Calculator {
 }
 
 function Close-TaskWindows {
-  # close notepad / explorer windows left by a task: untitled notepads + any window
+  # Close notepad / explorer windows left by a task: untitled notepads + any window
   # whose title contains 'Notepad'/'jishibench' (U+8BB0 U+4E8B U+672C) or one of the
-  # extra patterns (folder leaf names). Scoped by convention: dedicated eval box.
-  param([string[]]$Patterns = @())
+  # extra patterns (folder leaf names).
+  #
+  # SAFETY (2026-09-17): the box is no longer dedicated -- the same Notepad process
+  # may host the user's own documents, and Win11 Notepad is single-process
+  # multi-window. Kill-by-process-name therefore destroys user data. Default is now
+  # WM_CLOSE (per-window, title-matched) only; force-kill is opt-in via -ForceKill
+  # and must never be used on a shared box. Windows that stay open (modified docs
+  # pop a save dialog) are reported by title instead of being killed.
+  param([string[]]$Patterns = @(), [switch]$ForceKill)
   $untitled = ([string][char]0x65E0) + ([string][char]0x6807) + ([string][char]0x9898)
   $jishiben = ([string][char]0x8BB0) + ([string][char]0x4E8B) + ([string][char]0x672C)
   $found = @()
@@ -200,11 +207,27 @@ function Close-TaskWindows {
     $closed++
   }
   if ($closed -gt 0) { Start-Sleep -Milliseconds 800 }
-  # force-kill leftovers: WM_CLOSE on a modified untitled notepad pops a save dialog and stays
-  $needles = @('Notepad', $untitled, $jishiben) + $Patterns
-  Get-Process -Name 'Notepad' -ErrorAction SilentlyContinue | Where-Object {
-    $t = $_.MainWindowTitle
-    ($needles | Where-Object { $t -and $t.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -gt 0
-  } | Stop-Process -Force -ErrorAction SilentlyContinue
+  if ($ForceKill) {
+    # Legacy behaviour, opt-in only: WM_CLOSE on a modified notepad pops a save dialog
+    # and the window stays. Killing by process name also destroys every other window
+    # of that process (including user documents on a shared box).
+    $needles = @('Notepad', $untitled, $jishiben) + $Patterns
+    Get-Process -Name 'Notepad' -ErrorAction SilentlyContinue | Where-Object {
+      $t = $_.MainWindowTitle
+      ($needles | Where-Object { $t -and $t.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -gt 0
+    } | Stop-Process -Force -ErrorAction SilentlyContinue
+    return $closed
+  }
+  # Report leftovers honestly (title-matched) so the caller can tell the user what stayed.
+  $left = @()
+  foreach ($needle in (@('Notepad', $untitled, $jishiben) + $Patterns)) {
+    foreach ($w in @(Find-WindowsByTitle $needle)) { $left += ,@($w.hwnd, $w.title) }
+  }
+  $seen2 = @{}
+  foreach ($e in $left) {
+    if ($seen2.ContainsKey($e[0])) { continue }
+    $seen2[$e[0]] = $true
+    Write-Verbose ("leftover window: " + $e[1])
+  }
   return $closed
 }

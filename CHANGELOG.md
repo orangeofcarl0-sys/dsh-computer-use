@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.5.4 (2026-09-17)
+
+**主题**：dsh 0.1.5 大版本适配、点击坐标契约根治（所见即所点）、观察降噪与上下文预算 A–F、S4 评测回归系统、测试与代码结构治理。
+
+### Added
+
+- **observe 降噪**（工作区 PLAN-observe-noise，拍板 2026-09-16）：同一窗口 + 同一模式，且**上次观察后无任何动作**（快照未被消费）时，重复观察回极简回执——`observeDedup: summary`（默认，含"编号:角色"摘要）/ `brief`（单行）/ `off`（每次全量）；新增 `screen_observe(force=true)` 强制全量。判定用严格哈希并忽略时间/行列类噪声（实测：真实 35 元素记事本树 1586→250 字符，**降幅 84%**；brief 单行 95%）。注意本项省的是**上下文 token**，不减少工具调用步数（步速另由提示层"同一快照内无需重复观察"引导）。`maxElements` 默认 500→120（实测常见任务 30-70 个元素）。新增专项测试 `tests/observe.dedup.mjs`（13 断言：AC1 降幅 / AC2 变化必全量 / AC3 force / AC4 动作后必全量 / AC5 off 与 brief / D2 时间噪声）。
+
+- **上下文预算 A–F**（工作区 PLAN-context-budget，拍板 2026-09-16）：A 观察/缩放描述写入成本阶梯（ax < zoom ~200 tok < native ~3K tok）与用途对应；B schema 瘦身 **10176→9486 字符**；C 新增紧凑动作回执 + `verboseReceipts`（正常路径 click 299→~90 字符，不可验证路径仍附明细）；D 树标签 100→48 字符 + 多行折首行；E `app_list` 紧凑化 491→418 字符；F **新增第 20 个工具 `computer_task`**——把一段桌面操作委派给一次性子 agent（`ctx.subagents` + `toolFilter` 限定 19 个桌面工具 + `outputSchema` 强制 {ok,summary,evidence} + `maxDepth=1` + 超时），主上下文只吃一条 ≤400 字符回执，宿主无该能力时回委派配方。新增 `tests/task.tool.mjs`（14 断言）并入 npm test（全库 101 断言）
+
+- **坐标换算基准元数据**：observe/zoom 输出 `screenOrigin`（= `list_windows` 的 bounds；实测截图与该 bounds 逐像素相同）+ `coordinateSpace`，使"图内像素 × crop.scale + crop 原点 + screenOrigin = 屏幕物理像素"可算（zoom 实测为恒定 1.2× 上采样，裁剪宽 ≤500px）。
+- **未知参数拒发**：宿主参数表编译后不含 additionalProperties，参数名写错会被静默忽略并可能回退"z 序最前窗口"（实测踩坑：给 screen_observe 传 `app=` 观察到了别的应用）→ `wrap()` 单点拒绝并列明可接受参数；observe 未指定 window 时结果显式注明"已取最前窗口"。
+- **测试面**：`tests/schema.conformance.mjs`（把实现可能返回的每种形态——正常/守卫拒绝/观测降级/驱动错误——对着声明 schema 严格校验；本版收尾时覆盖 20 工具 × 42 场景）、`tests/live-action.e2e.mjs`（真桌面动作闭环 + 稳定性循环）、`tests/syntax.check.mjs`（修 `npm run check` 的 Windows glob 失效）。
+- **S4 评测回归系统**（仓库 `evals/`）：9 条任务（冒烟 4 + 核心 5）、PS oracle 四件套（setup/oracle/cleanup/simulate）、AC2 双向独立验证、零依赖 CDP runner（`--tier/--max-steps/--pin-model/--pin-effort`）、maintain/stop-stale/hygiene 运维脚本；坐标标定与键盘通道诊断脚本一并入库。
+
+### Fixed
+
+- **结构化拒绝被当成功上报（同类缺陷第三、四处）**：`scroll`/`drag` 此前未识别驱动的 `{refusal:{code}}` 回执，把拒绝当成功上报——与 menu 同一坑。新增 `lib/receipt.js` 把"判拒绝 → 标快照消费 → 出回执"收成唯一出口，新增工具只要走它就不会再漏（`tests/schema.conformance.mjs` 的拒绝形态场景矩阵即是该类的回归网）。
+- **坐标契约不一致导致点击整体偏移（根因修复）**：可控探针逐点标定（最小二乘残差 ≤0.55px）测出 `computer_click(x,y)` 的空间是**窗口矩形相对物理像素**（= 窗口截图空间），而 `screen_observe` 元素坐标是**屏幕物理像素**——两者差一个窗口原点向量（本机可达 1906×1166），模型"看到坐标直接点"必然打偏。观察输出已换算到点击空间（截图/元素/点击三者统一），文案与 `coordinateSpace` 同步更正；密码扫描/标记仍用原始屏幕坐标。
+- **dsh 0.1.5 严格输出校验下观察工具整次失败**：观测降级回执（`window/elementCount/mode/elements/visualOnly/driverAccess`）未在 output schema 声明 → `screen_zoom`/`screen_observe` 的降级路径报 invalid output（工具等于不可用）。抽出 `DESKTOP_FALLBACK_FIELDS` 供两者共用。
+- **驱动结构化拒绝被当成功上报**：`{"refusal":{code,message}}` 回执此前未识别 → `computer_menu` 对 `menu_path_unavailable` 仍回"已调用菜单路径"，模型据此继续下一步。抽出 `lib/engine.js` 统一识别四种拒绝形态（refusal/effect/error/code）。
+- **zoom 的脆弱点与比例错误**：zoom 曾为取窗口尺寸做带 UIA 扫描的 `get_window_state`（WinUI 应用 4s 超时会把整次 zoom 拖进桌面降级）→ 改用 `list_windows` 的 bounds（实测其与截图逐像素相同）；scale 曾用 attachments 归一化后的尺寸（会算出错误比例）→ 改用驱动返回的图尺寸，并输出非等比缩放提示。
+- **hotkey 的 UIA 加速器超时**不再抛原始引擎错误，改为可执行指引（改用控件点击/稍后重试）——上游 [trycua/cua#3908](https://github.com/trycua/cua/issues/3908)。
+- verify-runtime 三处测试脆弱点：Windows 动态 import 需 `file://` URL、驱动自身窗口排除用了不存在的进程名（实际是 `cua-driver.exe`）、工具数断言写死 12-13（现改为下限 + 关键工具在册）。
+
+### Changed（结构治理 P0/P1，2026-09-17）
+
+代码屎山审计后的落地，全部以机械证据收口（parity 逐字节比对或测试断言），不含行为猜测。
+
+- **测试脚手架去重（P0-1）**：新增 `tests/lib/harness.mjs`（临时工作副本 / 可编程驱动桩 / 假 ctx·exec / 与 dsh 严格语义对齐的 schema 校验器 / 断言记录器），`schema.conformance`、`observe.dedup`、`task.tool` 三套测试改为引用，删掉各自复制的 ~90 行脚手架。
+- **schema 覆盖 13/20 → 20/20 工具（P0-3）**：22 → 42 场景，补齐 `computer_double_click`/`right_click`/`wait_for`/`hover`/`stop`/`resume`/`computer_task`（后者含结构化成功 / 无结构化 / 宿主无服务三形态），并按驱动真实形态补全"结构化拒绝"（`{refusal:{code}}`）场景矩阵——该矩阵直接暴露并修掉了 Fixed 节里那条 scroll/drag 缺陷。
+- **配置接线测试（P0-2）**：新增 `tests/config.plumbing.mjs`——schema 键 ↔ `apply()` 组装的 cfg ↔ 实际读取点三向比对（含 `extremePatterns→extremeRes` 重命名白名单），外加 11 组行为哨兵（maxElements/observeDedup/verboseReceipts/supersession/ttlMs/deliveryMode/allowedApps/extremePatterns/cursorTheme/maxTaskCalls/visionProvider+nativeImage）；观测成本过高的 `passwordScan`/`taskTimeoutMin` 显式登记为静态兜底，不假装测过。
+- **删死代码（P0-4）**：`dedupInvalidate`（降噪失效已由"快照消费"闸门覆盖）、`taskCallCount`、`runAction`（被 humanAction 取代后无人调用）。
+- **拆超大函数（P1-5）**：`screenObserve`（194 行）→ 目标选择 / 抓树（含补抓与桌面降级短路）/ 结构性密码标记 / 元素映射 / 文本渲染 / 结果封装六个阶段函数；`screenZoom`（106 行）→ 目标解析 / 裁剪钳制 / 整窗回退。单函数 ≤66 行。**29 场景受控桩 parity 逐字节一致**。
+- **回执统一（P1-6）**：新增 `lib/receipt.js`（`receipt` / `refusalReceipt` / `settleAction`），点击/双击/右键/输入/按键/滚动/拖拽/菜单全部走同一出口——`scroll`/`drag` 从 JSON 内联改为紧凑回执（与 click 同形），"引擎拒绝"判断从 6 处收敛到 1 处（该类缺陷已在 menu/scroll/drag 三处实际发生过）。
+- **注册结构数据化（P1-7）**：四组工具改为返回定义数组的纯数据函数，注册与参数名登记收敛到 `apply()` 单处循环。**20 个工具的工具面 JSON 快照（描述/参数表/输出 schema/render/execute arity）逐字节一致**。如实说明：工具描述与 schema 是内容而非样板，`index.js` 体积基本未变（726→738 行），本项收益是"新增工具 = 加一项数据" + 工具面可机械校验。
+- **测试量**：`npm test` 148 断言（原 103）；真桌面闭环 `tests/live-action.e2e.mjs` 3 轮 30/30。
+
+
 ## 0.5.3 (2026-09-06)
 
 **结构性密码检测（Windows）**——PLAN-credential-guard 第二期：凭据硬保护从启发式升级为读取系统真实属性（结构位），补齐"无标签 + 空值"密码框盲区。探针实证关键前提：经典 Win32 `ES_PASSWORD` 样式位在两种 UIA 客户端均映射 `IsPassword=false`，样式位才是系统真值（已作为 follow-up 反馈上游 [#3576](https://github.com/trycua/cua/issues/3576#issuecomment-5554919425)）。
@@ -18,39 +57,6 @@
 ### Fixed
 
 - **结构密码标记坐标系错误**（A6 运行时端到端发现，2026-09-06）：`markElementsFromScan` 按"元素中心=窗口本地 + 原点换算"旧假设设计，而 cua-driver 0.23.2 的 frame 与 sidecar rect 同为**屏幕锚定物理像素**（同一密码框两套独立系统读数逐像素相等，探针 E2E 实证）——原点换算使标记整体偏移一个窗口原点向量，实测**标错相邻元素**（真密码框漏标 → guard 放行；上方普通框误标 → 误拒）。改为屏幕坐标直配，废弃双原点候选。sidecar 由 node 派生继承 DPI 感知返回物理 px（bash 直跑探针得逻辑 px，仅影响独立实验，部署路径一致）。E2E 9/9：注记/guard 硬拒/零误拒/sidecar 时延 1.4-1.6s/crop 元数据全通过。
-
-- **observe 降噪**（工作区 PLAN-observe-noise，拍板 2026-09-16）：同一窗口 + 同一模式，且**上次观察后无任何动作**（快照未被消费）时，重复观察回极简回执——`observeDedup: summary`（默认，含"编号:角色"摘要）/ `brief`（单行）/ `off`（每次全量）；新增 `screen_observe(force=true)` 强制全量。判定用严格哈希并忽略时间/行列类噪声（实测：真实 35 元素记事本树 1586→250 字符，**降幅 84%**；brief 单行 95%）。注意本项省的是**上下文 token**，不减少工具调用步数（步速另由提示层"同一快照内无需重复观察"引导）。`maxElements` 默认 500→120（实测常见任务 30-70 个元素）。新增专项测试 `tests/observe.dedup.mjs`（13 断言：AC1 降幅 / AC2 变化必全量 / AC3 force / AC4 动作后必全量 / AC5 off 与 brief / D2 时间噪声）。
-
-- **上下文预算 A–F**（工作区 PLAN-context-budget，拍板 2026-09-16）：A 观察/缩放描述写入成本阶梯（ax < zoom ~200 tok < native ~3K tok）与用途对应；B schema 瘦身 **10176→9486 字符**；C 新增紧凑动作回执 + `verboseReceipts`（正常路径 click 299→~90 字符，不可验证路径仍附明细）；D 树标签 100→48 字符 + 多行折首行；E `app_list` 紧凑化 491→418 字符；F **新增第 20 个工具 `computer_task`**——把一段桌面操作委派给一次性子 agent（`ctx.subagents` + `toolFilter` 限定 19 个桌面工具 + `outputSchema` 强制 {ok,summary,evidence} + `maxDepth=1` + 超时），主上下文只吃一条 ≤400 字符回执，宿主无该能力时回委派配方。新增 `tests/task.tool.mjs`（14 断言）并入 npm test（全库 101 断言）
-
-### Fixed（2026-09-16 批次）
-
-- **坐标契约不一致导致点击整体偏移（根因修复）**：可控探针逐点标定（最小二乘残差 ≤0.55px）测出 `computer_click(x,y)` 的空间是**窗口矩形相对物理像素**（= 窗口截图空间），而 `screen_observe` 元素坐标是**屏幕物理像素**——两者差一个窗口原点向量（本机可达 1906×1166），模型"看到坐标直接点"必然打偏。观察输出已换算到点击空间（截图/元素/点击三者统一），文案与 `coordinateSpace` 同步更正；密码扫描/标记仍用原始屏幕坐标。
-- **dsh 0.1.5 严格输出校验下观察工具整次失败**：观测降级回执（`window/elementCount/mode/elements/visualOnly/driverAccess`）未在 output schema 声明 → `screen_zoom`/`screen_observe` 的降级路径报 invalid output（工具等于不可用）。抽出 `DESKTOP_FALLBACK_FIELDS` 供两者共用。
-- **驱动结构化拒绝被当成功上报**：`{"refusal":{code,message}}` 回执此前未识别 → `computer_menu` 对 `menu_path_unavailable` 仍回"已调用菜单路径"，模型据此继续下一步。抽出 `lib/engine.js` 统一识别四种拒绝形态（refusal/effect/error/code）。
-- **zoom 的脆弱点与比例错误**：zoom 曾为取窗口尺寸做带 UIA 扫描的 `get_window_state`（WinUI 应用 4s 超时会把整次 zoom 拖进桌面降级）→ 改用 `list_windows` 的 bounds（实测其与截图逐像素相同）；scale 曾用 attachments 归一化后的尺寸（会算出错误比例）→ 改用驱动返回的图尺寸，并输出非等比缩放提示。
-- **hotkey 的 UIA 加速器超时**不再抛原始引擎错误，改为可执行指引（改用控件点击/稍后重试）——上游 [trycua/cua#3908](https://github.com/trycua/cua/issues/3908)。
-- verify-runtime 三处测试脆弱点：Windows 动态 import 需 `file://` URL、驱动自身窗口排除用了不存在的进程名（实际是 `cua-driver.exe`）、工具数断言写死 12-13（现改为下限 + 关键工具在册）。
-
-### 结构治理（2026-09-17 批次，P0/P1）
-
-代码屎山审计后的落地，全部以机械证据收口（parity 逐字节比对或测试断言），不含行为猜测。
-
-- **测试脚手架去重（P0-1）**：新增 `tests/lib/harness.mjs`（临时工作副本 / 可编程驱动桩 / 假 ctx·exec / 与 dsh 严格语义对齐的 schema 校验器 / 断言记录器），`schema.conformance`、`observe.dedup`、`task.tool` 三套测试改为引用，删掉各自复制的 ~90 行脚手架。
-- **schema 覆盖 13/20 → 20/20 工具（P0-3）**：22 → 42 场景，补齐 `computer_double_click`/`right_click`/`wait_for`/`hover`/`stop`/`resume`/`computer_task`（后者含结构化成功 / 无结构化 / 宿主无服务三形态），并按驱动真实形态补全"结构化拒绝"（`{refusal:{code}}`）场景矩阵——本项直接暴露并修掉了下面那条缺陷。
-- **配置接线测试（P0-2）**：新增 `tests/config.plumbing.mjs`——schema 键 ↔ `apply()` 组装的 cfg ↔ 实际读取点三向比对（含 `extremePatterns→extremeRes` 重命名白名单），外加 11 组行为哨兵（maxElements/observeDedup/verboseReceipts/supersession/ttlMs/deliveryMode/allowedApps/extremePatterns/cursorTheme/maxTaskCalls/visionProvider+nativeImage）；观测成本过高的 `passwordScan`/`taskTimeoutMin` 显式登记为静态兜底，不假装测过。
-- **删死代码（P0-4）**：`dedupInvalidate`（降噪失效已由"快照消费"闸门覆盖）、`taskCallCount`、`runAction`（被 humanAction 取代后无人调用）。
-- **拆超大函数（P1-5）**：`screenObserve`（194 行）→ 目标选择 / 抓树（含补抓与桌面降级短路）/ 结构性密码标记 / 元素映射 / 文本渲染 / 结果封装六个阶段函数；`screenZoom`（106 行）→ 目标解析 / 裁剪钳制 / 整窗回退。单函数 ≤66 行。**29 场景受控桩 parity 逐字节一致**。
-- **回执统一（P1-6）**：新增 `lib/receipt.js`（`receipt` / `refusalReceipt` / `settleAction`），点击/双击/右键/输入/按键/滚动/拖拽/菜单全部走同一出口——`scroll`/`drag` 从 JSON 内联改为紧凑回执（与 click 同形），"引擎拒绝"判断从 6 处收敛到 1 处（该类缺陷已在 menu/scroll/drag 三处实际发生过）。
-- **注册结构数据化（P1-7）**：四组工具改为返回定义数组的纯数据函数，注册与参数名登记收敛到 `apply()` 单处循环。**20 个工具的工具面 JSON 快照（描述/参数表/输出 schema/render/execute arity）逐字节一致**。如实说明：工具描述与 schema 是内容而非样板，`index.js` 体积基本未变（726→738 行），本项收益是"新增工具 = 加一项数据" + 工具面可机械校验。
-- **测试量**：`npm test` 148 断言（原 103）；真桌面闭环 `tests/live-action.e2e.mjs` 3 轮 30/30。
-
-### Added（2026-09-16 批次）
-
-- **坐标换算基准元数据**：observe/zoom 输出 `screenOrigin`（= `list_windows` 的 bounds；实测截图与该 bounds 逐像素相同）+ `coordinateSpace`，使"图内像素 × crop.scale + crop 原点 + screenOrigin = 屏幕物理像素"可算（zoom 实测为恒定 1.2× 上采样，裁剪宽 ≤500px）。
-- **未知参数拒发**：宿主参数表编译后不含 additionalProperties，参数名写错会被静默忽略并可能回退"z 序最前窗口"（实测踩坑：给 screen_observe 传 `app=` 观察到了别的应用）→ `wrap()` 单点拒绝并列明可接受参数；observe 未指定 window 时结果显式注明"已取最前窗口"。
-- **测试面**：`tests/schema.conformance.mjs`（19 工具 × 22 场景，把实现可能返回的每种形态——正常/守卫拒绝/观测降级/驱动错误——对着声明 schema 严格校验）、`tests/live-action.e2e.mjs`（真桌面动作闭环 + 稳定性循环）、`tests/syntax.check.mjs`（修 `npm run check` 的 Windows glob 失效）；`npm test` 串起四套冒烟共 74 断言。
-- **S4 评测回归系统**（仓库 `evals/`）：9 条任务（冒烟 4 + 核心 5）、PS oracle 四件套（setup/oracle/cleanup/simulate）、AC2 双向独立验证、零依赖 CDP runner（`--tier/--max-steps/--pin-model/--pin-effort`）、maintain/stop-stale/hygiene 运维脚本；坐标标定与键盘通道诊断脚本一并入库。
 
 ## 0.5.2 (2026-09-06)
 

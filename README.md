@@ -12,7 +12,7 @@
 
 ## 这是什么
 
-给 [DeepSeek Harness](https://github.com/988hj7tczd-oss/harness-desktop) 加一套可观察、可验证的桌面操作层：19 个模型友好工具，底层通过 [cua-driver](https://github.com/trycua/cua) 驱动本地桌面（独立虚拟光标，不抢真实鼠标）。Windows 深度实测——前台锁、XAML/WinUI 输入、观测几何这些硬墙都在本机踩过并解决。
+给 [DeepSeek Harness](https://github.com/988hj7tczd-oss/harness-desktop) 加一套可观察、可验证的桌面操作层：20 个模型友好工具，底层通过 [cua-driver](https://github.com/trycua/cua) 驱动本地桌面（独立虚拟光标，不抢真实鼠标）。Windows 深度实测——前台锁、XAML/WinUI 输入、观测几何这些硬墙都在本机踩过并解决。
 
 三个核心机制：
 
@@ -45,6 +45,8 @@
 | 确定性验证 | `computer_verify` / `computer_wait_for`：UIA 谓词断言与轮询（unknown 永不视为成功） |
 | 剪贴板与菜单 | 剪贴板读写（粘贴流）；菜单路径直调（fail-closed） |
 | 强杀开关 | `computer_stop` 锁存全部桌面操作，`computer_resume` 唯一解锁 |
+| 子 agent 委派 | `computer_task`：多步/噪声大的操作交给一次性子 agent（只能用桌面工具、必须以 `{ok,summary,evidence}` 收尾），主上下文只吃一条 ≤400 字符回执 |
+| 上下文成本控制 | 重复观察降噪（未变窗口回极简回执，实测大树 1586→250 字符）、成本阶梯写入工具描述（ax < zoom < native）、紧凑动作回执（`verboseReceipts` 排障时才附明细） |
 
 ## 20 个工具
 
@@ -144,12 +146,18 @@ screen_observe（AX 树失败/树空）
 - id: dsh-computer-use
   config:
     ttlMs: 60000
-    maxElements: 500
+    maxElements: 120
+    observeDedup: summary
+    verboseReceipts: false
+    taskTimeoutMin: 5
+    maxTaskCalls: 3
+    supersession: note
     allowedApps: []
     cursorTheme: com.dsh.computeruse.rainbow
     nativeImage: auto
     visionProvider: deepseek-official
     visionModel: deepseek-v4-flash-vision-exp
+    passwordScan: auto
     extremePatterns: []
     deliveryMode: auto
 ```
@@ -160,7 +168,10 @@ screen_observe（AX 树失败/树空）
 | `maxElements` | `120` | 单次观察最多返回的编号元素数（实测常见任务 30-70 个） |
 | `observeDedup` | `summary` | 重复观察降噪：同一未变窗口回极简回执——`summary`（含编号摘要）/ `brief`（单行）/ `off`（每次全量）；需要完整清单时传 `force=true` |
 | `verboseReceipts` | `false` | 动作回执详略：false = 只回一行要点；true = 附原始 JSON 明细（排障用） |
-| `taskTimeoutMin` | `10` | `computer_task` 默认超时分钟数（可用 `timeout_min` 覆盖，1-60） |
+| `taskTimeoutMin` | `5` | `computer_task` 默认超时分钟数（可用 `timeout_min` 覆盖，1-60）。实测设太长会在子 agent 无法收敛时纯浪费 |
+| `maxTaskCalls` | `3` | 每会话允许的 `computer_task` 次数上限（防委托风暴与反复超时重复劳动） |
+| `supersession` | `note` | 同快照连击语义：`note` 附一致性注记 / `enforce` 第二次动作直接拒绝（每动作一观察）/ `off` 全关 |
+| `passwordScan` | `auto` | Windows 结构性密码扫描（UIA sidecar 读 `IsPassword` ∨ `ES_PASSWORD` 结构位）；`off` = 零 spawn，凭据保护退回启发式。macOS/Linux 不适用 |
 | `allowedApps` | `[]` | 作用域白名单；空 = 不限制 |
 | `cursorTheme` | `com.dsh.computeruse.rainbow` | 虚拟光标主题；空 = 引擎默认 |
 | `nativeImage` | `auto` | `auto` 超限额自动降级 / `full` 原图 / `compact` 始终小图 |
@@ -194,9 +205,15 @@ screen_observe（AX 树失败/树空）
 ```bash
 npm install
 npm run check                      # 语法 + 安装脚本检查
-node tests/posture.smoke.mjs       # 无感自治姿态（12 断言，离线）
-node tests/delivery-chain.smoke.mjs # 三级投递链（3 断言，离线）
+npm test                           # 七套离线测试共 148 断言：
+                                   #   posture 34（无感自治姿态/凭据硬保护/快照新鲜度）
+                                   #   tools 15 · delivery-chain 3
+                                   #   schema.conformance 20 工具 × 42 场景（按声明 schema 严格校验每种返回形态，
+                                   #     含结构化拒绝/驱动错误/观测降级——dsh 严格输出校验类 bug 的守门测试）
+                                   #   observe.dedup 13 · task.tool 16 · config.plumbing 25
 node verify-runtime.mjs            # 运行时验证（需真实 harness + cua-driver）
+node tests/live-action.e2e.mjs 3   # 真桌面动作闭环 + 稳定性循环（真记事本 3 轮）
+node evals/verify-oracles.mjs      # S4 评测 oracle 双向验证（setup 必 ok → 空跑必失败 → simulate 必过）
 ```
 
 ## License
@@ -207,7 +224,7 @@ node verify-runtime.mjs            # 运行时验证（需真实 harness + cua-d
 
 # English (brief)
 
-Personal Computer Use plugin for the DeepSeek Harness: 19 model-friendly tools driving local desktops through [cua-driver](https://github.com/trycua/cua) with an isolated virtual cursor. Windows-deep-tested.
+Personal Computer Use plugin for the DeepSeek Harness: 20 model-friendly tools driving local desktops through [cua-driver](https://github.com/trycua/cua) with an isolated virtual cursor. Windows-deep-tested.
 
 **Stance — zero-friction autonomy**: no approval prompts, no interruptions; capabilities always on (auto desktop-level observation fallback, three-tier delivery escalation that restores the previous foreground). The only hard refusal is automated typing into password fields. `extremePatterns` adds non-blocking warning notes.
 
