@@ -73,6 +73,29 @@ evals/
 - **打包应用重启竞态**：杀进程后要等它真正消失再启动，并带重试（`Start-Calculator`）。
 - **驱动提权窗口清理不掉**：cua-driver（疑似提权）spawn 的窗口，非提权侧 taskkill/Stop-Process/PostMessage 全失效（UIPI）；`Close-TaskWindows` 只能处理脚本自己启的窗口。这是当前最大的环境噪声源，修复项见 PLAN §10.5。
 - notepad 标签页控件类型是 **TabItem**（不是 ListItem）；窗口标题只显示活动标签。
+- **dsh 0.1.5 UI 变化（2026-09-16 实证）**：`document.execCommand('insertText')` 在 composer 上失效（长度恒 0，会发出空消息）→ 必须走 CDP `Input.insertText`；轮次页脚由 `N 轮 · M 步` 变为 `N 轮 M 步`（无分隔点）；新建会话后页面可能被其他会话视图覆盖 → 发送前必须**二次校验当前会话仍是 0 轮**，回合结束再校验 prompt 标记在活动会话文本里。
+
+## 模型通道配置（opencode go 6649，2026-09-16）
+
+ZCode 侧的廉价同源通道（同一 deepseek-v4.1-flash，走 opencode zen/go 代理）搬进 dsh 的三处改动，全部在 `~/.dsh/settings.yaml`（备份 `settings.yaml.bak-pre-opencode-go-*`）：
+
+1. `agent-default-model` 改指 `opencode-go / deepseek-v4.1-flash / high`（新会话默认用它；旧值 deepseek-official/deepseek-flash）。
+2. 补全 `llm-pi-ai.providers.opencode-go`（原本只有 apiKeyEnv 的半成品）：`api: openai-completions`、`baseURL: https://opencode.ai/zen/go/v1`、模型规格（1M 上下文 / 128K 输出 / 文+图）。
+3. **必需请求头** `x-opencode-session: <uuid>`——该路由按会话做路由亲和，缺头会被 400 `MissingSessionID` 拒掉（"Request is missing x-opencode-session"）。dsh 的 provider 配置支持 `headers:` 字段（`dsh-llm-pi-ai` 会把 `profile.headers` 并入请求）。密钥无需搬运：`.credentials.yaml` 里已有 `OPENCODE_GO_API_KEY`。
+
+诊断顺序（复现用）：探针号 `probe-model`（读选择器标签）→ `probe-menu2`（列出模型/推理档条目）→ `probe-compat`（最小回合：0 轮新会话 → 输入 → 发送 → 轮询回合是否出内容）。
+runner 侧用 `--pin-model "DeepSeek V4.1 Flash (OpenCode)" --pin-effort High` 钉定，避免依赖会话记忆。
+
+### 首次运行结果（2026-09-16，冒烟组，8 分钟 / 40 步上限）
+
+| 任务 | 结果 | 步数/时长 |
+|---|---|---|
+| t07 窗口最大化 | **pass** | 7 步 / 104s（旧配置 18 步 / 301s） |
+| t01 记事本输入保存 | timeout | 36 步 / 494s |
+| t04 计算器 | timeout（撞步数上限） | 40 步 / 439s |
+| wa2 设隐藏 | timeout | 32 步 / 494s |
+
+步速约 11-15 秒/步；能收敛的任务很快（t07 一条动作 104 秒收工），不收敛的仍在多窗口/对话框上耗满预算——与旧配置同构，说明瓶颈在任务执行面而非模型档位。
 
 ## 运行期语义（试跑定案 2026-09-07）
 
