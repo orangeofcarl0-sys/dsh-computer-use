@@ -37,6 +37,8 @@ const modelLabel = arg('model-label', 'dsv4fv')
 const dshUrlArg = arg('dsh-url', '')
 const timeoutMin = Number(arg('timeout-min', '15'))
 const maxSteps = Number(arg('max-steps', '0'))   // 0 = disabled; step budget for fast-fail runs
+const pinModel = arg('pin-model', '')            // e.g. "DeepSeek V4.1 Flash (OpenCode)"
+const pinEffort = arg('pin-effort', '')          // e.g. "High"
 const drySetup = hasFlag('dry-setup')
 const keepChrome = hasFlag('keep-chrome')
 
@@ -205,12 +207,19 @@ const JS = {
   })()`,
 }
 
-async function waitComposerReady(page, timeoutMs = 20000) {
+async function waitComposerReady(page, timeoutMs = 75000) {
   const deadline = Date.now() + timeoutMs
+  let reloaded = false
   while (Date.now() < deadline) {
-    const st = JSON.parse(await page.evaluate(JS.sessionState))
-    if (st.hasComposer) return st
-    await delay(800)
+    let st
+    try { st = JSON.parse(await page.evaluate(JS.sessionState)) } catch { st = null }
+    if (st && st.hasComposer) return st
+    // app not hydrated yet: retry navigation once after 20s (post-restart boots can be slow)
+    if (!reloaded && Date.now() > deadline - timeoutMs + 20000) {
+      reloaded = true
+      try { await page.send('Page.reload', {}) } catch {}
+    }
+    await delay(1200)
   }
   throw new Error('composer never appeared')
 }
@@ -260,12 +269,86 @@ async function newFreshSession(page) {
   throw new Error(`fresh session check failed: rounds=${lastState?.rounds} ctx=${ctx}`)
 }
 
+/**
+ * Pin model + reasoning effort for this session via the picker menu
+ * (dsh 0.1.5 UI: menu -> "模型" submenu -> entry; menu -> "推理等级" -> entry).
+ * Returns the resulting picker label for the record.
+ */
+async function ensureModel(page, modelText, effortText) {
+  if (!modelText && !effortText) return null
+  const openMenu = `(() => {
+    const b = [...document.querySelectorAll('button[aria-label]')].find(x => x.getAttribute('aria-label').includes('选择模型'));
+    if (!b) return 'no-btn';
+    b.click(); return 'opened';
+  })()`
+  const clickLabel = (label) => `(() => {
+    const els = [...document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], button, div')];
+    for (const e of els) {
+      const l = e.querySelector('[class*="cellLabel"]');
+      if (l && l.textContent.trim() === ${JSON.stringify(label)}) { e.click(); return 'clicked'; }
+    }
+    return 'not-found';
+  })()`
+  const clickItem = (text) => `(() => {
+    const els = [...document.querySelectorAll('[role="menuitem"], [role="menuitemradio"], li, button, div')];
+    for (const e of els) {
+      const t = (e.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (t === ${JSON.stringify(text)} && e.children.length <= 8) { e.click(); return 'clicked'; }
+    }
+    return 'not-found';
+  })()`
+  const readLabel = `(() => {
+    const b = [...document.querySelectorAll('button[aria-label]')].find(x => x.getAttribute('aria-label').includes('选择模型'));
+    return b ? b.getAttribute('aria-label') : null;
+  })()`
+
+  if (modelText) {
+    await page.evaluate(openMenu); await delay(1200)
+    await page.evaluate(clickLabel('模型')); await delay(1600)
+    const r = await page.evaluate(clickItem(modelText))
+    if (r !== 'clicked') console.log('   ! model entry not found:', modelText)
+    await delay(1500)
+  }
+  if (effortText) {
+    await page.evaluate(openMenu); await delay(1200)
+    await page.evaluate(clickLabel('推理等级')); await delay(1600)
+    let items = []
+    try { items = JSON.parse(await page.evaluate(`(() => {
+      const out = [];
+      for (const m of document.querySelectorAll('[role="menu"]')) for (const e of m.querySelectorAll('[role="menuitem"], [role="menuitemradio"], li, button')) {
+        const t = (e.textContent || '').replace(/\\s+/g, ' ').trim();
+        if (t && t.length < 40) out.push(t);
+      }
+      return JSON.stringify([...new Set(out)]);
+    })()`)) } catch {}
+    const target = items.find((t) => t.toLowerCase() === effortText.toLowerCase())
+      || items.find((t) => t.toLowerCase().includes(effortText.toLowerCase()))
+    if (target) { await page.evaluate(clickItem(target)); await delay(1200) }
+    else console.log('   ! effort entry not found among', JSON.stringify(items).slice(0, 160))
+    if (!target) await page.evaluate(openMenu) // close if we left it open
+  }
+  await delay(600)
+  return page.evaluate(readLabel)
+}
+
 async function runTaskInSession(page, task, timeoutMin) {
   const wallStart = Date.now()
   const st0 = await newFreshSession(page)
   await delay(800)
   const st0b = JSON.parse(await page.evaluate(JS.sessionState))
   if (st0b.rounds !== 0) throw new Error(`fresh session drifted: rounds=${st0b.rounds} (refusing to send)`)
+  if (pinModel || pinEffort) {
+    const label = await ensureModel(page, pinModel, pinEffort)
+    console.log('   pinned model:', label)
+    task.pinnedLabel = label
+  }
+  // Re-verify right before typing: the app can re-navigate to another session while the
+  // picker menus are open (observed 2026-09-16: a poll read the user's session stats).
+  const preSend = JSON.parse(await page.evaluate(JS.sessionState))
+  const preLen = JSON.parse(await page.evaluate(JS.transcript)).len
+  if (preSend.rounds !== 0 || preLen > 12000) {
+    throw new Error(`session view drifted before send: rounds=${preSend.rounds} len=${preLen} (refusing)`)
+  }
   const sendState = await typePromptIntoComposer(page, COMMON_CONSTRAINT + task.prompt)
   if (!String(sendState).startsWith('typed:')) throw new Error('typing into composer failed: ' + sendState)
   await delay(600)
@@ -273,6 +356,21 @@ async function runTaskInSession(page, task, timeoutMin) {
   if (typed2.clen < 20) throw new Error('composer lost typed text: ' + JSON.stringify(typed2))
   const sent = await page.evaluate(JS.clickSend)
   if (sent !== 'sent') throw new Error('send failed: ' + sent)
+  // Phase 0: wait for the turn to actually START (streaming / steps / transcript growth).
+  // Without this, a briefly-idle DOM right after send looks like a finished turn and the
+  // oracle runs before the agent does anything (observed 2026-09-16 on the dsh 0.1.5 UI).
+  let baselineLen = -1
+  try { baselineLen = JSON.parse(await page.evaluate(JS.transcript)).len } catch {}
+  let started = false
+  const startDeadline = Date.now() + 60000
+  while (Date.now() < startDeadline) {
+    await delay(2500)
+    let s = null
+    try { s = JSON.parse(await page.evaluate(JS.sessionState)) } catch {}
+    let len = baselineLen
+    try { len = JSON.parse(await page.evaluate(JS.transcript)).len } catch {}
+    if (s && (s.streaming || s.steps >= 1 || len > baselineLen + 300)) { started = true; break }
+  }
   // poll turn end: rounds>=1 and message-stream quiet; auto-deny pending approvals
   // (agent tried a non-GUI path -> denial feedback pushes it back to GUI)
   const deadline = Date.now() + timeoutMin * 60000
@@ -324,7 +422,12 @@ async function runTaskInSession(page, task, timeoutMin) {
     }
   }
   const completed = quiet >= 4 && !st.streaming && st.rounds >= 1
-  return { rounds: st.rounds, steps: st.steps, wallMs, model: st.model, replyTail: lastTail.slice(-400), completed, stepCapHit, ring: ring.join(' '), denials }
+  // identity check: our prompt marker must be in the active session transcript
+  let inSession = null
+  try {
+    inSession = await page.evaluate(`(() => (document.body.innerText || '').includes('重要约束'))()`)
+  } catch {}
+  return { rounds: st.rounds, steps: st.steps, wallMs, model: task.pinnedLabel || st.model, replyTail: lastTail.slice(-400), completed, started, inSession, stepCapHit, ring: ring.join(' '), denials }
 }
 
 // ---------- metadata ----------
@@ -386,11 +489,17 @@ try {
         rec.replyTail = run.replyTail
         rec.denials = run.denials
         try { rec.sessionId = await page.evaluate(JS.sessionRef) } catch {}
-        if (!run.completed) {
+        if (run.inSession === false) {
+          rec.verdict = 'error'
+          rec.notes.push('prompt marker not found in active session transcript - message may have landed elsewhere')
+        } else if (!run.completed) {
           // budget exhausted (wall clock or step cap) without a quiet turn end:
           // timeout, oracle is meaningless mid-flight
           rec.verdict = 'timeout'
-          rec.notes.push((run.stepCapHit ? `step cap ${maxSteps} hit` : `turn not finished in ${timeoutMin}min`) + '; ring=' + (run.ring || '').slice(0, 400))
+          const why = !run.started ? 'turn never started (provider/model?)'
+            : run.stepCapHit ? `step cap ${maxSteps} hit`
+            : `turn not finished in ${timeoutMin}min`
+          rec.notes.push(why + '; ring=' + (run.ring || '').slice(0, 400))
         } else {
           const orc = await runPs('oracle', task.id, 120000)
           rec.verdict = orc.code === 0 ? 'pass' : orc.code === 1 ? 'fail' : 'error'

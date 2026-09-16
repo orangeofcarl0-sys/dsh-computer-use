@@ -31,10 +31,14 @@ try {
     const c = document.querySelector('[contenteditable="true"]');
     if (!c) return 'no-composer';
     c.focus();
-    document.execCommand('insertText', false, ${JSON.stringify(PROMPT)});
-    return 'typed:' + c.textContent.length;
+    document.execCommand('selectAll', false, null);
+    return 'focused';
   })()`)
-  console.log('typed:', typed)
+  console.log('focus:', typed)
+  try { await page.send('Input.insertText', { text: PROMPT }) } catch (e) { console.log('insertText failed:', String(e).slice(0, 120)) }
+  await delay(700)
+  const clen = await page.evaluate(`(() => { const c = document.querySelector('[contenteditable="true"]'); return c ? c.textContent.length : -1; })()`)
+  console.log('composer length:', clen)
   await delay(600)
   const sent = await page.evaluate(`(() => {
     const b = document.querySelector('button[aria-label="发送消息"]');
