@@ -211,11 +211,16 @@ async function runTool(name, args, agent) {
   check('vision 模式：无 key 不崩溃、观察者降级提示', v?.ok === true && visionPart.length > 0, visionPart.trim().slice(0, 150))
 }
 
-// 6) 坐标语义标记
+// 6) 坐标语义：文字标注 + 结构化字段一致（2026-09-16 实测标定：点击空间 = 窗口矩形相对物理像素）
 {
   services.llm = services.llmImage
-  const r = await runTool('screen_observe', { mode: 'native', window: testWindowRef }, agentWith('deepseek-official', 'deepseek-v4-flash-vision-exp'))
-  check('坐标语义 = 截图像素（输出标注）', /截图像素/.test(r.value?.result ?? ''))
+  // force=true：同窗口同模式此前已观察过（降噪会回极简 stub），这里要的是完整回执
+  const r = await runTool('screen_observe', { mode: 'native', window: testWindowRef, force: true }, agentWith('deepseek-official', 'deepseek-v4-flash-vision-exp'))
+  const res = r.value?.result ?? ''
+  check('坐标语义标注 = 窗口截图物理像素', /窗口截图物理像素/.test(res), res.split('\n')[1]?.slice(0, 70))
+  check('coordinateSpace 字段 = window-screenshot-px', r.value?.coordinateSpace === 'window-screenshot-px', String(r.value?.coordinateSpace))
+  check('screenOrigin 元数据存在（换算基准）', r.value?.screenOrigin === null || typeof r.value?.screenOrigin?.x === 'number',
+    JSON.stringify(r.value?.screenOrigin))
 }
 
 

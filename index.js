@@ -40,7 +40,7 @@ const defineTool = (options) => {
   return rawDefineTool(options)
 }
 
-import { screenObserve, screenZoom } from './lib/observe.js'
+import { screenObserve, screenZoom, dedupReset } from './lib/observe.js'
 import {
   click, doubleClick, rightClick, typeText, key, scroll, drag, wait, listApps, launchApp,
 } from './lib/actions.js'
@@ -59,8 +59,10 @@ export const inject = ['tools']
 export const Config = z.object({
   /** 观察快照的有效期（毫秒）。 */
   ttlMs: z.number().default(60000),
-  /** screen_observe 最多返回多少编号元素。 */
-  maxElements: z.number().default(500),
+  /** screen_observe 最多返回多少编号元素（实测常见任务 30-70 个；大树可显式调大）。 */
+  maxElements: z.number().default(120),
+  /** 重复观察降噪（同一未变窗口）：summary = 极简回执 + 上次元素摘要；brief = 只回一行；off = 每次都全量。 */
+  observeDedup: z.union(['brief', 'summary', 'off']).default('summary'),
   /** 区域限制：允许操作的应用名白名单（空 = 不限制）。 */
   allowedApps: z.array(z.string()).default([]),
   /** 虚拟光标主题 id（空 = 不设置，用引擎默认）。 */
@@ -329,7 +331,11 @@ function registerObserveTools(ctx, cfg, wrap) {
       },
       maxElements: {
         type: 'integer',
-        description: '可选：最多返回多少个编号元素（防上下文爆炸）。',
+        description: '可选：最多返回多少个编号元素（默认 120，防上下文爆炸；大树可显式调大）。',
+      },
+      force: {
+        type: 'boolean',
+        description: '可选：强制返回完整界面树。同一窗口界面未变时本工具会回极简"状态未变"回执以省上下文——需要完整清单时传 force=true。',
       },
     },
     output: { ...OUT({
@@ -606,9 +612,11 @@ function registerOpsTools(ctx, cfg, wrap, opsState) {
 }
 
 export function apply(ctx, config) {
+  dedupReset()   // 每次 apply 视为全新会话状态（降噪缓存随会话走，避免陈旧哈希被复用）
   const cfg = {
     ttlMs: config.ttlMs,
     maxElements: config.maxElements,
+    observeDedup: config.observeDedup || 'summary',
     supersession: config.supersession || 'note',
     allowedApps: Array.isArray(config.allowedApps) ? config.allowedApps : [],
     cursorTheme: config.cursorTheme,

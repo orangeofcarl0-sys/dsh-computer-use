@@ -50,7 +50,7 @@
 
 | 工具 | 作用 | 主要参数 |
 |---|---|---|
-| `screen_observe` | 观察窗口：编号树 / 截图直读 / 视觉描述 | `window`, `mode`, `query`, `maxElements` |
+| `screen_observe` | 观察窗口：编号树 / 截图直读 / 视觉描述（未变时回极简回执，`force=true` 强制全量） | `window`, `mode`, `query`, `maxElements`, `force` |
 | `screen_zoom` | 区域放大细看 / **树空目标定位原语** | `window_id`, `pid`, `x1`, `y1`, `x2`, `y2` |
 | `computer_click` | 点击元素或坐标 | `element` 或 `x,y`；可选 `count`、`foreground` |
 | `computer_double_click` | 双击 | 同上 |
@@ -156,7 +156,8 @@ screen_observe（AX 树失败/树空）
 | 配置项 | 默认 | 说明 |
 |---|---:|---|
 | `ttlMs` | `60000` | 观察快照有效期（毫秒） |
-| `maxElements` | `500` | 单次观察最多返回的编号元素数 |
+| `maxElements` | `120` | 单次观察最多返回的编号元素数（实测常见任务 30-70 个） |
+| `observeDedup` | `summary` | 重复观察降噪：同一未变窗口回极简回执——`summary`（含编号摘要）/ `brief`（单行）/ `off`（每次全量）；需要完整清单时传 `force=true` |
 | `allowedApps` | `[]` | 作用域白名单；空 = 不限制 |
 | `cursorTheme` | `com.dsh.computeruse.rainbow` | 虚拟光标主题；空 = 引擎默认 |
 | `nativeImage` | `auto` | `auto` 超限额自动降级 / `full` 原图 / `compact` 始终小图 |
