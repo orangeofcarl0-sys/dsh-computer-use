@@ -46,7 +46,7 @@
 | 剪贴板与菜单 | 剪贴板读写（粘贴流）；菜单路径直调（fail-closed） |
 | 强杀开关 | `computer_stop` 锁存全部桌面操作，`computer_resume` 唯一解锁 |
 
-## 19 个工具
+## 20 个工具
 
 | 工具 | 作用 | 主要参数 |
 |---|---|---|
@@ -67,8 +67,9 @@
 | `computer_hover` | 悬停（实验性：覆盖层 / real=真实指针） | `pid`, `window_id`, `x`, `y`, `real` |
 | `computer_stop` | **强杀开关**：结束会话并锁存全部桌面操作 | 无 |
 | `computer_resume` | 解锁 stop 并预热会话（唯一解锁路径） | 无 |
-| `app_list` | 列出运行中的应用 | 无 |
-| `app_launch` | 启动应用（后台，可选前置） | `name` / `bundle_id`, `bring_to_front` |
+| `app_list` | 列出运行中的应用（紧凑：一行一应用，超 20 条截断） | 无 |
+| `app_launch` | 启动应用（后台，可选前置）。注意：驱动需管理员权限，故启动的应用继承高完整性级别、非提权客户端无法关闭它 | `name` / `bundle_id`, `bring_to_front` |
+| `computer_task` | **委派**：把一段桌面操作交给一次性子 agent（限定只能用桌面工具、必须以 {ok,summary,evidence} 收尾），主上下文只吃一条 ≤400 字符回执；宿主无子 agent 能力时返回委派配方 | `goal`, `success_criteria`, `constraints`, `timeout_min`, `model`, `model_effort` |
 
 ## 快速开始
 
@@ -158,6 +159,8 @@ screen_observe（AX 树失败/树空）
 | `ttlMs` | `60000` | 观察快照有效期（毫秒） |
 | `maxElements` | `120` | 单次观察最多返回的编号元素数（实测常见任务 30-70 个） |
 | `observeDedup` | `summary` | 重复观察降噪：同一未变窗口回极简回执——`summary`（含编号摘要）/ `brief`（单行）/ `off`（每次全量）；需要完整清单时传 `force=true` |
+| `verboseReceipts` | `false` | 动作回执详略：false = 只回一行要点；true = 附原始 JSON 明细（排障用） |
+| `taskTimeoutMin` | `10` | `computer_task` 默认超时分钟数（可用 `timeout_min` 覆盖，1-60） |
 | `allowedApps` | `[]` | 作用域白名单；空 = 不限制 |
 | `cursorTheme` | `com.dsh.computeruse.rainbow` | 虚拟光标主题；空 = 引擎默认 |
 | `nativeImage` | `auto` | `auto` 超限额自动降级 / `full` 原图 / `compact` 始终小图 |
