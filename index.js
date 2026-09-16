@@ -313,8 +313,9 @@ const VERIFY_PARAMS = {
 }
 
 /** ── 观察组：screen_observe / screen_zoom ── */
-function registerObserveTools(ctx, cfg, wrap) {
-  ctx.tools.register(defineTool({
+function observeToolDefs(ctx, cfg, wrap) {
+  return [
+  {
     name: 'screen_observe',
     description:
       '观察屏幕：生成目标窗口的"编号 + 控件 + 坐标"界面树（AX，零视觉成本）。动作前需先取得快照；' +
@@ -355,9 +356,9 @@ function registerObserveTools(ctx, cfg, wrap) {
       ...IMAGE_FIELD,
     }), render: renderWithImage },
     execute: wrap('screen_observe', (args, cfg2, exec) => screenObserve(ctx, args, cfg2, exec)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'screen_zoom',
     description:
       '区域截图直读：把窗口某块区域裁成 ≤500px JPEG 交给模型看图（~200 tok，远低于整窗 PNG）。' +
@@ -390,36 +391,38 @@ function registerObserveTools(ctx, cfg, wrap) {
       ...IMAGE_FIELD,
     }), render: renderWithImage },
     execute: wrap('screen_zoom', (args, cfg2, exec) => screenZoom(ctx, args, cfg2, exec)),
-  }))
+  },
+  ]
 }
 
 /** ── 动作组：computer_* + app_* ── */
-function registerActionTools(ctx, cfg, wrap) {
-  ctx.tools.register(defineTool({
+function actionToolDefs(ctx, cfg, wrap) {
+  return [
+  {
     name: 'computer_click',
     description: '点击：传入 screen_observe 输出的元素编号（element），或窗口截图像素坐标（x,y）。点击的是 cua-driver 的虚拟光标，不抢真实鼠标。默认后台投递（后台/最小化/隐藏窗口也可点，不抢焦点）；后台不可用时按 deliveryMode（默认 auto）自动升级投递并恢复原前台。',
     parameters: { ...TARGET_PARAMS, ...SNAPSHOT_ID_PARAM, ...FOREGROUND_PARAM, count: { type: 'integer', description: '可选：点击次数，默认 1。' } },
     output: OUT(),
     execute: wrap('computer_click', (args, cfg2) => click(args, cfg2)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_double_click',
     description: '双击：element 编号 或 x/y 坐标（后台投递，不抢焦点）。',
     parameters: { ...TARGET_PARAMS, ...SNAPSHOT_ID_PARAM, ...FOREGROUND_PARAM },
     output: OUT(),
     execute: wrap('computer_double_click', (args, cfg2) => doubleClick(args, cfg2)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_right_click',
     description: '右键点击：element 编号 或 x/y 坐标（后台投递，不抢焦点）。',
     parameters: { ...TARGET_PARAMS, ...SNAPSHOT_ID_PARAM, ...FOREGROUND_PARAM },
     output: OUT(),
     execute: wrap('computer_right_click', (args, cfg2) => rightClick(args, cfg2)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_type',
     description: '文本输入：向当前焦点（或指定元素）输入一段文本。指定 element 时走 UIA ValuePattern 后台写入（不抢焦点，XAML/WinUI 主机必需）；注意：不要在密码框使用——密码必须由用户本人输入（敏感输入保护）。',
     parameters: {
@@ -430,9 +433,9 @@ function registerActionTools(ctx, cfg, wrap) {
     },
     output: OUT(),
     execute: wrap('computer_type', (args, cfg2) => typeText(args, cfg2)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_key',
     description: '按键 / 快捷键：如 return、tab、escape、cmd+c、shift+tab（默认后台 PostMessage 投递，目标窗口无需前台）。',
     parameters: {
@@ -442,9 +445,9 @@ function registerActionTools(ctx, cfg, wrap) {
     },
     output: OUT(),
     execute: wrap('computer_key', (args, cfg2) => key(args, cfg2)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_scroll',
     description: '滚动：在目标窗口内向上/下/左/右滚动。',
     parameters: {
@@ -456,9 +459,9 @@ function registerActionTools(ctx, cfg, wrap) {
     },
     output: OUT(),
     execute: wrap('computer_scroll', (args, cfg2) => scroll(args, cfg2)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_drag',
     description: '拖拽：在快照窗口内从 (from_x,from_y) 拖到 (to_x,to_y)，坐标为窗口本地截图像素。',
     parameters: {
@@ -472,9 +475,9 @@ function registerActionTools(ctx, cfg, wrap) {
     },
     output: OUT(),
     execute: wrap('computer_drag', (args, cfg2) => drag(args, cfg2)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_wait',
     description: '等待：暂停一段时间（如等待界面加载/动画完成），不调用引擎。',
     parameters: {
@@ -482,9 +485,9 @@ function registerActionTools(ctx, cfg, wrap) {
     },
     output: OUT(),
     execute: wrap('computer_wait', (args) => wait(args)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'app_list',
     description: '列出当前正在运行的应用（名称 + pid），用于选择要操作的目标。',
     parameters: {},
@@ -499,9 +502,9 @@ function registerActionTools(ctx, cfg, wrap) {
       },
     } }),
     execute: wrap('app_list', () => listApps()),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'app_launch',
     description: '启动一个应用（后台启动，不抢焦点；可选 bring_to_front 前置到前台）。用于"打开应用"这一步。'
       + '注意：驱动本体以管理员权限运行（其二进制清单即要求提权），因此本工具启动的应用会继承**提升后的权限（高完整性级别）**——'
@@ -527,12 +530,14 @@ function registerActionTools(ctx, cfg, wrap) {
     },
     output: OUT({ pid: { oneOf: [{ type: 'integer' }, { type: 'null' }] } }),
     execute: wrap('app_launch', (args) => launchApp(args)),
-  }))
+  },
+  ]
 }
 
 /** ── 委派组：computer_task（把一段桌面操作交给一次性子 agent，主上下文只吃一条结果） ── */
-function registerTaskTool(ctx, cfg, wrap) {
-  ctx.tools.register(defineTool({
+function taskToolDefs(ctx, cfg, wrap) {
+  return [
+  {
     name: 'computer_task',
     description:
       '把一段桌面操作委派给一次性子 agent：主上下文只收到一条紧凑结果（≤300 字 + 证据列表），'
@@ -567,12 +572,14 @@ function registerTaskTool(ctx, cfg, wrap) {
       },
     }),
     execute: wrap('computer_task', (args, cfg2, exec) => runComputerTask(ctx, args, cfg2, exec)),
-  }))
+  },
+  ]
 }
 
 /** ── 运营组：确定性验证 / 轮询 / 剪贴板 / 菜单 / 悬停 / 强杀 ── */
-function registerOpsTools(ctx, cfg, wrap, opsState) {
-  ctx.tools.register(defineTool({
+function opsToolDefs(ctx, cfg, wrap, opsState) {
+  return [
+  {
     name: 'computer_verify',
     description:
       '确定性验证：对目标窗口求值 1-8 条结构化谓词（AND），驱动走 UIA 判定 satisfied/unsatisfied/unknown；unknown 永不算成功（fail-closed）。' +
@@ -580,9 +587,9 @@ function registerOpsTools(ctx, cfg, wrap, opsState) {
     parameters: { ...VERIFY_PARAMS, include_screenshot: { type: 'boolean', description: '可选：附最终窗口截图作为视觉证据（不参与判定）。' } },
     output: { ...OUT({ ...VERIFY_RESULT, image: IMAGE_FIELD.image }), render: renderWithImage },
     execute: wrap('computer_verify', (args) => verifyOnce(ctx, args)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_wait_for',
     description:
       '谓词轮询等待：反复求值 computer_verify 同款谓词，全部满足即返回（含等待时长与验证次数），超时返回最后一次状态（结构化失败，不伪装成功）。' +
@@ -594,9 +601,9 @@ function registerOpsTools(ctx, cfg, wrap, opsState) {
     },
     output: { ...OUT({ ...VERIFY_RESULT, attempts: { type: 'integer' }, waitedMs: { type: 'integer' } }) },
     execute: wrap('computer_wait_for', (args) => waitFor(ctx, args)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_clipboard',
     description:
       '系统剪贴板读写。action="write" 写入文本（配合 computer_key ctrl+v 组成"粘贴流"——特殊字符/长文本最可靠的输入路径）；' +
@@ -607,9 +614,9 @@ function registerOpsTools(ctx, cfg, wrap, opsState) {
     },
     output: OUT({ text: { oneOf: [{ type: 'string' }, { type: 'null' }] } }),
     execute: wrap('computer_clipboard', (args) => opsClipboard(args)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_menu',
     description:
       '菜单路径直调：按精确逐级菜单路径（如 ["文件","另存为"]）经无障碍 API 解析并调用最终项。' +
@@ -621,9 +628,9 @@ function registerOpsTools(ctx, cfg, wrap, opsState) {
     },
     output: OUT(),
     execute: wrap('computer_menu', (args) => opsMenu(args)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_hover',
     description:
       '悬停（实验性）：移动虚拟光标到窗口本地截图像素 (x,y)。默认仅移动 agent 覆盖层；' +
@@ -637,9 +644,9 @@ function registerOpsTools(ctx, cfg, wrap, opsState) {
     },
     output: OUT(),
     execute: wrap('computer_hover', (args) => opsHover(args)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_stop',
     description:
       '强杀开关：立即结束驱动会话（清理虚拟光标/录制）并锁存——之后所有桌面工具（观察/动作/应用）一律拒绝，直至调用 computer_resume。' +
@@ -647,15 +654,16 @@ function registerOpsTools(ctx, cfg, wrap, opsState) {
     parameters: {},
     output: OUT(),
     execute: wrap('computer_stop', () => opsStop(opsState)),
-  }))
+  },
 
-  ctx.tools.register(defineTool({
+  {
     name: 'computer_resume',
     description: '解锁 computer_stop 锁存并预热会话（唯一解锁路径）。解锁后观察快照为空，必须先 screen_observe 再操作。',
     parameters: {},
     output: OUT(),
     execute: wrap('computer_resume', () => opsResume(opsState)),
-  }))
+  },
+  ]
 }
 
 export function apply(ctx, config) {
@@ -715,10 +723,14 @@ export function apply(ctx, config) {
     }
   }
 
-  registerObserveTools(ctx, cfg, wrap)
-  registerActionTools(ctx, cfg, wrap)
-  registerOpsTools(ctx, cfg, wrap, opsState)
-  registerTaskTool(ctx, cfg, wrap)
+  // 工具面 = 数据：各组返回定义数组，注册（含参数名登记，供未知参数拒绝）只在下面这一处发生。
+  // 新增工具 = 在对应组的数组里加一项；注册顺序即工具顺序（parity 快照依赖它）。
+  for (const def of [
+    ...observeToolDefs(ctx, cfg, wrap),
+    ...actionToolDefs(ctx, cfg, wrap),
+    ...opsToolDefs(ctx, cfg, wrap, opsState),
+    ...taskToolDefs(ctx, cfg, wrap),
+  ]) ctx.tools.register(defineTool(def))
 
   ctx.logger?.info('dsh-computer-use: 20 个工具已注册（观察组 screen_observe/zoom · 动作组 computer_click/double/right/type/key/scroll/drag/wait + app_list/launch · 运营组 verify/wait_for/clipboard/menu/hover/stop/resume · 委派组 computer_task）')
 }
