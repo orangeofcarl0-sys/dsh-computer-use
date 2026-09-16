@@ -135,6 +135,30 @@ const IMAGE_FIELD = {
 }
 
 /**
+ * 坐标换算基准字段（2026-09-16 实测）：截图 = 窗口 bounds 的 1:1 物理像素裁剪
+ * （同窗口 bounds 1906×1166 == screenshot 1906×1166）→ 屏幕原点即 bounds.x/y。
+ * 观察类工具对外声明这两项，模型才能把"图内像素"换算成"屏幕物理像素"。
+ */
+const SCREEN_ORIGIN_FIELDS = {
+  screenOrigin: {
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          x: { type: 'integer' }, y: { type: 'integer' },
+          width: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+          height: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+        },
+      },
+      { type: 'null' },
+    ],
+    description: '窗口在屏幕上的物理像素原点（= list_windows bounds）；null = 未取到，坐标换算不可用。',
+  },
+  coordinateSpace: { type: 'string', description: '本次观察各坐标所处的空间（screen-physical-px = 屏幕物理像素）。' },
+}
+
+/**
  * 观测降级形态的公共字段：窗口级观测被拒时 desktopFallback() 返回这一组字段
  * （window/elementCount/mode/elements/visualOnly/driverAccess）。观察类工具的
  * output schema 必须同时声明它们——dsh 0.1.5 起对工具输出做严格校验
@@ -312,6 +336,7 @@ function registerObserveTools(ctx, cfg, wrap) {
       ...DESKTOP_FALLBACK_FIELDS,
       screenshotFile: { oneOf: [{ type: 'string' }, { type: 'null' }] },
       snapshotId: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '本次观察的快照 id（动作可携带 snapshot_id 声明证据基线）。' },
+      ...SCREEN_ORIGIN_FIELDS,
       ...IMAGE_FIELD,
     }), render: renderWithImage },
     execute: wrap('screen_observe', (args, cfg2, exec) => screenObserve(ctx, args, cfg2, exec)),
@@ -344,6 +369,7 @@ function registerObserveTools(ctx, cfg, wrap) {
         },
         description: '本图对应的整窗区域与换算比例（定位原语）。',
       },
+      ...SCREEN_ORIGIN_FIELDS,
       // 降级路径（窗口级观测被拒 → desktopFallback）会回本组字段，schema 必须容纳
       ...DESKTOP_FALLBACK_FIELDS,
       ...IMAGE_FIELD,
