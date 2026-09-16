@@ -488,7 +488,10 @@ function registerActionTools(ctx, cfg, wrap) {
 
   ctx.tools.register(defineTool({
     name: 'app_launch',
-    description: '启动一个应用（后台启动，不抢焦点；可选 bring_to_front 前置到前台）。用于"打开应用"这一步。',
+    description: '启动一个应用（后台启动，不抢焦点；可选 bring_to_front 前置到前台）。用于"打开应用"这一步。'
+      + '注意：驱动本体以管理员权限运行（其二进制清单即要求提权），因此本工具启动的应用会继承**提升后的权限（高完整性级别）**——'
+      + '这类窗口在非提权客户端侧无法被关闭/终止（UIPI 拒绝 taskkill/Stop-Process/WM_CLOSE），可能残留并干扰后续观察。'
+      + '优先直接操作已在运行的普通应用；确需新启动时，任务结束后请提示用户手动关闭。',
     parameters: {
       name: {
         type: 'string',
