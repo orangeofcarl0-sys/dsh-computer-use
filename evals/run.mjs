@@ -48,7 +48,10 @@ const keepChrome = hasFlag('keep-chrome')
 // Prepend (not append): models weight the top of the prompt; the constraint must
 // be read before the task. Sandbox dir is intentionally OUTSIDE the session
 // workspace so direct writes get denied -> denial feedback pushes back to GUI.
-const COMMON_CONSTRAINT = '【重要约束】本任务必须只通过图形界面完成（在屏幕上点击、拖拽、键盘输入）。禁止使用命令行/终端、文件写入工具或任何绕过屏幕的方式。不要向用户提问；自主完成任务后直接结束回合。\n\n'
+const COMMON_CONSTRAINT = '【重要约束】本任务必须只通过图形界面完成（在屏幕上点击、拖拽、键盘输入）。禁止使用命令行、终端、文件写入工具或任何绕过屏幕的方式。不要向用户提问；自主完成任务后直接结束回合。'
+  // 目标应用上某条操作路径可能被引擎挡住（工具会返回明确提示，如快捷键不可用需改用控件）：
+  // 要求 agent 换用界面上等效的控件继续，而不是卡死在同一路径——这本身就是要测的能力。
+  + '若某条操作路径不可用（工具会说明原因），请改用界面上等效的控件或通道完成同一操作，不要反复重试同一条失败路径。\n\n'
 
 // ---------- task discovery ----------
 function discoverTasks() {
