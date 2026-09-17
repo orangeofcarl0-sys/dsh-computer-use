@@ -1,8 +1,8 @@
 # dsh-computer-use 发布清单（PUBLISH）
 
-> 状态更新：2026-09-17 · **v0.5.4 已发布**：`v0.3` 与默认分支 `main` 均指向 `fc7aae2`；注解 tag `v0.5.4` 指向发布提交 `b967698`（其后一条 `fc7aae2` 只补发布记录文档）。
-> 发布前 check 全绿：`npm run check` / `npm test`（148 断言）/ `verify-runtime.mjs`（14/14）/ `tests/live-action.e2e.mjs`（23/23，重设计后）/
-> `evals/verify-oracles.mjs`（10/10，首次 t04 因遗留计算器窗口失败、清理后复跑通过）/ `npm pack --dry-run`（28 文件，无内部文档）。
+> 状态更新：2026-09-17 · **v0.5.5 已发布**：`v0.3` 与默认分支 `main` 均指向 `8476a2e`；注解 tag `v0.5.5`。
+> 发布前 check（本版）：`npm run check` / `npm test`（173 断言）/ `verify-runtime.mjs`（16/16）/ `tests/live-action.e2e.mjs`（23/23）/
+> `npm pack --dry-run`（29 文件，无内部文档）；另用 headless 真机探针确认**发布版在 dsh 0.1.5-rc.2 上能加载且折叠态生效**（该探针本轮抓出两个加载级 bug）。
 > npm 发布与 awesome 收录仍未做，见文末。
 
 ## 发布口径（2026-09-17 确立）
@@ -39,7 +39,11 @@ node evals/verify-oracles.mjs
 # 6. 打包面预检：确认 npm 包里只有运行面文件（无内部项目书/测试/文档草稿）
 npm pack --dry-run
 
-# 7. 文档一致性（版本号 / 工具数 / 默认值三处对齐）
+# 7. 真机加载验证（必做：唯一能发现"整棵插件树加载失败"的检查）
+#    发布前用 headless 探针确认插件在真实 dsh 上能加载、折叠态生效：
+dsh --profile headless --patch "<工作区>/_probe-surface.yml" "调用 computer_do(action='status')，把返回原文贴出来"
+
+# 8. 文档一致性（版本号 / 工具数 / 默认值三处对齐）
 grep -n '"version"' package.json package-lock.json
 grep -rn "个模型友好工具\|20 个工具" README.md package.json docs/store-evidence.md
 ```
@@ -75,7 +79,7 @@ git ls-remote --tags origin | grep v0.5.4
 | topics | `dsh-plugin` + `deepseek-harness` + `computer-use` + `cua-driver` + `ai-agents` |
 | dsh-plugin topic 收录 | ✅ 已出现在 https://github.com/topics/dsh-plugin |
 | 内部项目书 | ✅ 已从远程移除（`dsh-computer-use.md` 在 .gitignore；⚠️ 首次提交的历史里仍有，介意需 filter-repo 重写） |
-| tag 历史 | v0.4.0 / v0.4.1 / v0.5.0 / v0.5.1 / v0.5.2 / v0.5.3 / **v0.5.4**（均为注解 tag；仓库未使用 GitHub Releases 页面，PUBLISH 视其为可选项）|
+| tag 历史 | v0.4.0 / v0.4.1 / v0.5.0 / v0.5.1 / v0.5.2 / v0.5.3 / v0.5.4 / **v0.5.5**（均为注解 tag；仓库未使用 GitHub Releases 页面，PUBLISH 视其为可选项）|
 
 ## ⏳ 待做：npm 发布（dsh-market 安装途径）
 
