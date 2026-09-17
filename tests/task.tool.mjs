@@ -6,7 +6,7 @@
  *  T3 未返回结构化结果 → 失败并附子 agent 末尾输出
  *  T4 超时 → 取消并报超时
  *  T5 宿主无 subagents 服务 → 返回委派配方（不执行）
- *  T6 不支持 toolFilter/outputSchema 的宿主 → 自动降级重试并注明
+ *  T6 能力降级阶梯：只丢 toolFilter（保住结构化）→ 再丢 outputSchema → 全失败报错，每级如实注明原因
  *  T7 toolFilter 白名单与注册工具集一致（防拼错工具名导致子 agent 被限死）
  */
 import { join } from 'node:path'
@@ -81,18 +81,48 @@ async function setup({ subagents }) {
 
 // ── T6：宿主不支持 toolFilter/outputSchema → 降级重试并注明 ──────────
 {
-  let calls = 0
-  const fake = {
+  // T6a：宿主支持 outputSchema 但不支持 toolFilter（真实形态：restrict 名字校验只认全局层）
+  //      → 应只丢掉 toolFilter，**保住结构化输出**，并把拒绝原因如实写进回执
+  let callsA = 0
+  const fakeA = {
     list: () => ['spawn'],
     async start(name, req) {
-      calls++
-      if (req.toolFilter || req.outputSchema) throw new Error('capability not supported: toolFilter')
-      return { id: 'c', result: Promise.resolve({ stopReason: 'completed', structured: { ok: true, summary: 'done' } }), async dispose() {} }
+      callsA++
+      if (req.toolFilter) throw new Error('tools.restrict() names unknown global tools')
+      return {
+        id: 'c', result: Promise.resolve({ stopReason: 'completed', structured: { ok: true, summary: 'done', evidence: ['app_list 原文'] } }),
+        async dispose() {},
+      }
     },
   }
-  const { call } = await setup({ subagents: fake })
-  const r = await call('computer_task', { goal: 'x' })
-  check('T6 降级重试一次并成功', calls === 2 && r.ok === true && /已降级/.test(r.result), `calls=${calls}`)
+  const a = await setup({ subagents: fakeA })
+  const rA = await a.call('computer_task', { goal: 'x' })
+  check('T6a 只丢 toolFilter、保住结构化输出', callsA === 2 && rA.ok === true && rA.structured?.summary === 'done',
+    `calls=${callsA} ok=${rA.ok}`)
+  check('T6a 降级回执如实给出原因与权限后果',
+    /已降级/.test(rA.result) && /unknown global tools/.test(rA.result) && /同级的能力|未受限|同类能力/.test(rA.result),
+    String(rA.result).slice(0, 90))
+
+  // T6b：宿主连结构化也不支持 → 再降一级，并明确"结果未结构化"
+  let callsB = 0
+  const fakeB = {
+    list: () => ['spawn'],
+    async start(name, req) {
+      callsB++
+      if (req.toolFilter || req.outputSchema) throw new Error('capability not supported')
+      return { id: 'c2', result: Promise.resolve({ stopReason: 'completed', structured: { ok: true, summary: 'done' } }), async dispose() {} }
+    },
+  }
+  const b = await setup({ subagents: fakeB })
+  const rB = await b.call('computer_task', { goal: 'x' })
+  check('T6b 两级降级后仍成功且如实标注未结构化', callsB === 3 && rB.ok === true && /结果未结构化/.test(rB.result),
+    `calls=${callsB}`)
+
+  // T6c：三级都失败 → 报启动失败（不静默）
+  const fakeC = { list: () => ['spawn'], async start() { throw new Error('no provider capability at all') } }
+  const c = await setup({ subagents: fakeC })
+  const rC = await c.call('computer_task', { goal: 'x' })
+  check('T6c 全部降级失败 → 明确报错', rC.ok === false && /启动失败/.test(String(rC.result)), String(rC.result).slice(0, 70))
 }
 
 // ── T7：白名单与注册工具集一致性 ────────────────────────────────────

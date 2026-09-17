@@ -45,7 +45,7 @@
 | 确定性验证 | `computer_verify` / `computer_wait_for`：UIA 谓词断言与轮询（unknown 永不视为成功） |
 | 剪贴板与菜单 | 剪贴板读写（粘贴流）；菜单路径直调（fail-closed） |
 | 强杀开关 | `computer_stop` 锁存全部桌面操作，`computer_resume` 唯一解锁 |
-| 子 agent 委派 | `computer_task`：多步/噪声大的操作交给一次性子 agent（只能用桌面工具、必须以 `{ok,summary,evidence}` 收尾），主上下文只吃一条 ≤400 字符回执 |
+| 子 agent 委派 | `computer_task`：多步/噪声大的操作交给一次性子 agent，必须以 `{ok,summary,evidence}` 收尾，主上下文只吃一条 ≤400 字符回执。**工具范围能否限制取决于宿主能力**：能限制时只给桌面工具；宿主拒绝该约束时插件照常委派并在回执里如实写明（含拒绝原因）——见〈委派的能力边界〉 |
 | 上下文成本控制 | 重复观察降噪（未变窗口回极简回执，实测大树 1586→250 字符）、成本阶梯写入工具描述（ax < zoom < native）、紧凑动作回执（`verboseReceipts` 排障时才附明细） |
 
 ## 动态工具面（默认只有 2 个可见工具）
@@ -83,7 +83,7 @@
 | `computer_resume` | 解锁 stop 并预热会话（唯一解锁路径） | 无 |
 | `app_list` | 列出运行中的应用（紧凑：一行一应用，超 20 条截断） | 无 |
 | `app_launch` | 启动应用（后台，可选前置）。注意：驱动需管理员权限，故启动的应用继承高完整性级别、非提权客户端无法关闭它 | `name` / `bundle_id`, `bring_to_front` |
-| `computer_task` | **委派**：把一段桌面操作交给一次性子 agent（限定只能用桌面工具、必须以 {ok,summary,evidence} 收尾），主上下文只吃一条 ≤400 字符回执；宿主无子 agent 能力时返回委派配方 | `goal`, `success_criteria`, `constraints`, `timeout_min`, `model`, `model_effort` |
+| `computer_task` | **委派**：把一段桌面操作交给一次性子 agent（以 {ok,summary,evidence} 收尾），主上下文只吃一条 ≤400 字符回执；宿主无子 agent 能力时返回委派配方。工具范围限制见〈委派的能力边界〉 | `goal`, `success_criteria`, `constraints`, `timeout_min`, `model`, `model_effort` |
 
 ## 快速开始
 
@@ -139,6 +139,16 @@ screen_observe（AX 树失败/树空）
 ```
 
 `screen_zoom` 结果附 `crop` 元数据（原点/尺寸/换算比例）并给出换算公式。裁剪务必让目标占画面主导——实测目标主导小裁剪误差 13-80px。
+
+## 委派的能力边界（诚实说明）
+
+`computer_task` 想给子 agent 施加三条约束：限定工具范围（只用桌面工具）、要求结构化输出、禁止再派生。它们是**独立的宿主能力**，能否生效取决于宿主提供方：
+
+- 三者都支持 → 子 agent 只拿到桌面工具，结构化结果经宿主校验；
+- 宿主拒绝工具范围约束时（实测形态：`tools.restrict() names unknown global tools`——动态工具面把工具注册在会话作用域后，宿主对 `toolFilter` 的名字校验只认全局层）→ 插件**丢掉这一条、保住结构化输出**，并在回执里写明"子 agent 拥有与父会话同级的能力"及拒绝原因；
+- 宿主连结构化也不支持 → 再降一级，回执标注"结果未结构化"。
+
+也就是说：**在宿主不支持工具范围约束的部署上，子 agent 与父会话能力同级（可能具备 shell/文件工具）**。插件不会把这条约束当作已生效来上报；需要严格限制时，请用宿主自己的子 agent 机制并在其配置里限定工具。
 
 ## 前后台投递
 

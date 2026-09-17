@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.6 (未发布)
+
+### Fixed
+
+- **委派的能力降级阶梯（0.5.5 引入的安全相关回归）**：`toolFilter` 在宿主内部是 scoped `tools.restrict()`，其名字校验**只认全局层**；0.5.5 的动态工具面把 19 个工具注册进会话作用域后，`toolFilter` 必然被拒（`tools.restrict() names unknown global tools`）→ 子 agent 不受限（实测它跑了 bash）。旧实现一次丢掉 toolFilter+outputSchema 并只说"已降级"，既不安全也误导（结构化结果其实还能用）。改为**三级阶梯**：全量 → 只丢 toolFilter（保住结构化输出与深度限制）→ 再丢 outputSchema → 全失败则明确报错；每级把**拒绝原因与权限后果**写进回执（"子 agent 拥有与父会话同级的能力"）。README 新增"委派的能力边界"一节，去掉"只能用桌面工具"这一在本机部署上不成立的声明。
+
 ## 0.5.5 (2026-09-17)
 
 **动态工具面**（PLAN-meta-tool，拍板 2026-09-17）：诉求不是省 token，而是**避免 20 个工具的 schema 常驻造成的注意力负担**。
