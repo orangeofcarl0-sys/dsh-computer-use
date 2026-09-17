@@ -66,6 +66,7 @@ const isStub = (o) => /状态未变/.test(raw(o))
 async function fresh(cfgExtra = {}) {
   const { reg, ctx, exec } = makeCtx()
   plugin.apply(ctx, { ttlMs: 60000, maxElements: 120, deliveryMode: 'auto', passwordScan: 'off', ...cfgExtra })
+  await reg.get('computer_do').execute({ action: 'enter' }, exec)   // 展开工具面（AC4 需要 computer_key）
   return (name, args = {}) => reg.get(name).execute(args, exec)
 }
 

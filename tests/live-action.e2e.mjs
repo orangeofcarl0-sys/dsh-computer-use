@@ -52,6 +52,8 @@ const ctx = {
 }
 // passwordScan off：本轮不需要 sidecar spawn
 plugin.apply(ctx, { ttlMs: 60000, maxElements: 120, deliveryMode: 'auto', nativeImage: 'auto', passwordScan: 'off' })
+// 动态工具面（PLAN-meta-tool）：先展开，否则下面的动作/验证/应用工具都不可见
+await (async () => { const d = registered.get('computer_do'); await d.execute({ action: 'enter' }, { agent: { id: 'live-e2e' }, signal: new AbortController().signal, get signalSet() { return true } }) })()
 
 const agent = { options: { provider: 'p', model: 'm' }, session: { requestHeader: () => ({ config: { provider: 'p', model: 'm' } }) } }
 async function call(name, args = {}) {

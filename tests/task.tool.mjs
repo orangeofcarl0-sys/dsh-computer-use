@@ -19,10 +19,11 @@ const { check, state: checkState } = makeChecks()
 const plugin = await loadPlugin(work)
 const { GUI_ONLY_TOOLS, DELEGATION_RECIPE } = await import(pathToFileURL(join(work, 'lib', 'task.js')).href)
 
-function setup({ subagents }) {
+async function setup({ subagents }) {
   const overrides = subagents ? { subagents } : {}
   const { reg, ctx, exec } = makeCtx({ services: makeServices(overrides), agent: { id: 'parent-agent' } })
   plugin.apply(ctx, { ttlMs: 60000, maxElements: 120, deliveryMode: 'auto', passwordScan: 'off' })
+  await reg.get('computer_do').execute({ action: 'enter' }, exec)   // 展开工具面（computer_task 属展开态）
   return { call: (name, args) => reg.get(name).execute(args, exec), reg }
 }
 
@@ -38,7 +39,7 @@ function setup({ subagents }) {
       }
     },
   }
-  const { call } = setup({ subagents: fake })
+  const { call } = await setup({ subagents: fake })
   const r = await call('computer_task', { goal: '把两行文字保存到 C:\\tmp\\note.txt', success_criteria: '文件内容逐字匹配', timeout_min: 3 })
   check('T1 走 provider=spawn', seen?.name === 'spawn', seen?.name)
   const prompt = seen?.req?.prompt?.[0]?.text || ''
@@ -54,7 +55,7 @@ function setup({ subagents }) {
 // ── T3：无结构化结果 ────────────────────────────────────────────────
 {
   const fake = { list: () => ['spawn'], async start() { return { id: 'c', result: Promise.resolve({ stopReason: 'error', output: [{ type: 'text', text: '我尽力了但没成功' }] }), async dispose() {} } } }
-  const { call } = setup({ subagents: fake })
+  const { call } = await setup({ subagents: fake })
   const r = await call('computer_task', { goal: 'x' })
   check('T3 无结构化 → ok=false 且附末尾输出', r.ok === false && /未返回结构化结果/.test(r.result) && /尽力了/.test(r.result), r.result.slice(0, 80))
 }
@@ -63,7 +64,7 @@ function setup({ subagents }) {
 {
   let disposed = false
   const fake = { list: () => ['spawn'], async start() { return { id: 'c', result: new Promise(() => {}), async dispose() { disposed = true } } } }
-  const { call } = setup({ subagents: fake })
+  const { call } = await setup({ subagents: fake })
   // 用 1 分钟下限无法快速测；改为直接断言超时路径存在：注入极小 timeout 不受支持 → 跳过等待，改为验证 dispose 被调用
   const p = call('computer_task', { goal: 'x', timeout_min: 1 })
   await new Promise((r) => setTimeout(r, 50))
@@ -73,7 +74,7 @@ function setup({ subagents }) {
 
 // ── T5：宿主缺失服务 → 配方兜底 ─────────────────────────────────────
 {
-  const { call } = setup({ subagents: null })
+  const { call } = await setup({ subagents: null })
   const r = await call('computer_task', { goal: '任意' })
   check('T5 无服务 → 返回配方且未执行', r.ok === false && r.result.includes(DELEGATION_RECIPE.slice(0, 20)) && /子任务/.test(r.result), r.result.slice(0, 70))
 }
@@ -89,14 +90,14 @@ function setup({ subagents }) {
       return { id: 'c', result: Promise.resolve({ stopReason: 'completed', structured: { ok: true, summary: 'done' } }), async dispose() {} }
     },
   }
-  const { call } = setup({ subagents: fake })
+  const { call } = await setup({ subagents: fake })
   const r = await call('computer_task', { goal: 'x' })
   check('T6 降级重试一次并成功', calls === 2 && r.ok === true && /已降级/.test(r.result), `calls=${calls}`)
 }
 
 // ── T7：白名单与注册工具集一致性 ────────────────────────────────────
 {
-  const { reg } = setup({ subagents: null })
+  const { reg } = await setup({ subagents: null })
   const registered = [...reg.keys()]
   const missing = GUI_ONLY_TOOLS.filter((n) => !registered.includes(n))
   check('T7 toolFilter 白名单全部是已注册工具', missing.length === 0, missing.length ? '缺: ' + missing.join(',') : `${GUI_ONLY_TOOLS.length} 项全在册`)
@@ -110,7 +111,7 @@ function setup({ subagents }) {
     list: () => ['spawn'],
     async start() { return { id: 'c', result: Promise.resolve({ stopReason: 'completed', structured: { ok: true, summary: 'ok' } }), async dispose() {} } },
   }
-  const { call } = setup({ subagents: fake })
+  const { call } = await setup({ subagents: fake })
   resetTaskCalls()
   const r1 = await call('computer_task', { goal: 'a' })
   const r2 = await call('computer_task', { goal: 'b' })
@@ -124,7 +125,7 @@ function setup({ subagents }) {
   const { resetTaskCalls } = await import(pathToFileURL(join(work, 'lib', 'task.js')).href)
   resetTaskCalls()
   const fake = { list: () => ['spawn'], async start() { return { id: 'c', result: new Promise(() => {}), async dispose() {} } } }
-  const { call } = setup({ subagents: fake })
+  const { call } = await setup({ subagents: fake })
   const p = call('computer_task', { goal: 'x', timeout_min: 1 })
   await new Promise((r) => setTimeout(r, 30))
   check('T9 长任务未立即返回（超时逻辑在跑）', true)

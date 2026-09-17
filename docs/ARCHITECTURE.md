@@ -1,6 +1,6 @@
 # ARCHITECTURE — dsh-computer-use
 
-> 结构快照：v0.5.4（20 工具，依赖单向 DAG：`index.js → lib → cua-driver`，无环、无兼容层）。
+> 结构快照：v0.5.5（动态工具面：折叠态 2 / 展开态 21；依赖单向 DAG：`index.js → lib → cua-driver`，无环、无兼容层）。
 
 ## 1. 模块清单
 
@@ -12,6 +12,7 @@
 | `lib/ops.js` | 183 | 确定性验证（verify/wait_for）、剪贴板、菜单直调、悬停、强杀锁存 | cua / snapshot / attach / receipt |
 | `lib/cua.js` | 221 | 驱动定位（resolveBin）、会话管理、**三级投递链 cuaDeliver**、错误规范化 | node 内置 |
 | `lib/engine.js` | 36 | 驱动回执判定（共享）：`engineRefusal` 识别四种拒绝/失败形态（`refusal`/`effect`/`error`/`code`）、`uiaAcceleratorTimeout` 识别 UIA 加速器超时 | — |
+| `lib/surface.js` | 118 | **动态工具面两态状态机**：折叠态（computer_do + screen_observe）/ 展开态（按 agent 作用域懒注册 19 个）；幂等；连续 2 次非桌面调用自动回落；清单常量 | — |
 | `lib/receipt.js` | 66 | **回执与动作收尾的唯一出口**：`receipt`（紧凑回执）、`refusalReceipt`、`settleAction`（规范化 → 判拒绝 → 标记快照消费/可疑），杜绝"某个工具漏判把拒绝上报成功" | cua / engine / snapshot |
 | `lib/task.js` | 177 | `computer_task` 委派实现（子会话请求构造、结构化结果映射、降级重试、超时、每会话预算） | — |
 | `lib/guard.js` | ~80 | 凭据硬保护（密码框）、极危注记、allowedApps 白名单 | snapshot |

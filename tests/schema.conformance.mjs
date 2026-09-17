@@ -140,6 +140,8 @@ function setServices(mode) {
 }
 
 plugin.apply(ctx, { ttlMs: 60000, maxElements: 120, deliveryMode: 'auto', nativeImage: 'auto', passwordScan: 'off' })
+// 动态工具面（PLAN-meta-tool）：折叠态只有 computer_do + screen_observe，先展开再跑场景矩阵
+await (async () => { const d = registered.get('computer_do'); await d.execute({ action: 'enter' }, baseExec) })()
 
 async function runTool(name, args) {
   const def = registered.get(name)

@@ -51,6 +51,9 @@ import {
   createOpsState, gate as opsGate, stop as opsStop, resume as opsResume,
   verifyOnce, waitFor, clipboard as opsClipboard, menu as opsMenu, hover as opsHover,
 } from './lib/ops.js'
+import {
+  ALWAYS_VISIBLE, EXPANDED_ONLY, enterSurface, exitSurface, expandedReceipt, isExpanded, noteToolCall, surfaceReset,
+} from './lib/surface.js'
 
 export const name = 'dsh-computer-use'
 
@@ -317,36 +320,22 @@ function observeToolDefs(ctx, cfg, wrap) {
   return [
   {
     name: 'screen_observe',
+    // 精简版（PLAN-meta-tool 拍板：折叠态常驻工具必须轻）——prose 190 字符 + S3a 协议（协议内容归全局常量）。
+    // 成本阶梯等细节靠 mode 参数说明与 S3a 协议承载；输出 schema 不动（dsh 严格校验要求返回字段必须声明）。
     description:
-      '观察屏幕：生成目标窗口的"编号 + 控件 + 坐标"界面树（AX，零视觉成本）。动作前需先取得快照；' +
-      '坐标 = 窗口截图物理像素，与 computer_click 同空间，可直接传。' +
-      '成本阶梯（左低右高）：ax（纯文本）< screen_zoom 小裁剪(~200 tok) < native 整窗 PNG(~3K tok)——' +
-      '读文字用 native（无损），只判布局/找位置用 ax + screen_zoom，别为看布局付整窗 PNG 的钱。' +
-      'mode：ax（默认）/ vision（视觉观察者结构化描述）/ native（截图直读，需模型支持图片输入）；' +
-      'AX 树不可解析（游戏/Canvas/Electron）时自动降级 native→vision→ax。快照 60s 过期；' +
-      '界面未变时本工具回极简回执（force=true 强制全量）。' + S3_ASSERT_PROTOCOL,
+      '观察屏幕：目标窗口的"编号 + 控件 + 坐标"界面树（AX，零视觉成本），坐标与 computer_click 同空间可直接传。' +
+      '动作前必须先观察取快照（60s 过期）。成本：ax（文本）< screen_zoom 小裁剪 < native 整窗 PNG 直读——' +
+      '读文字用 native，判布局用 ax/zoom。' + S3_ASSERT_PROTOCOL,
     parameters: {
-      window: {
-        type: 'string',
-        description: '可选：目标窗口，传 pid 数字或标题子串（如 "访达"）。缺省选最前窗口。',
-      },
+      window: { type: 'string', description: '目标窗口：pid 或标题子串；缺省取最前窗口。' },
       mode: {
         type: 'string',
         enum: ['ax', 'vision', 'native'],
-        description: 'ax（默认）= 零成本的界面树；vision = 视觉观察者描述；native = 截图直读（模型直接看图）。',
+        description: 'ax（默认，纯文本）/ vision（观察者描述）/ native（截图直读）；树不可解析时自动降级 native→vision→ax。',
       },
-      query: {
-        type: 'string',
-        description: '可选：按控件标签过滤界面树（如 "提交"）。',
-      },
-      maxElements: {
-        type: 'integer',
-        description: '可选：最多返回多少个编号元素（默认 120，防上下文爆炸；大树可显式调大）。',
-      },
-      force: {
-        type: 'boolean',
-        description: '可选：强制返回完整界面树。同一窗口界面未变时本工具会回极简"状态未变"回执以省上下文——需要完整清单时传 force=true。',
-      },
+      query: { type: 'string', description: '按控件标签过滤界面树。' },
+      maxElements: { type: 'integer', description: '最多返回的编号元素数（默认 120）。' },
+      force: { type: 'boolean', description: '强制完整界面树（界面未变时默认只回极简回执以省上下文）。' },
     },
     output: { ...OUT({
       ...DESKTOP_FALLBACK_FIELDS,
@@ -666,6 +655,71 @@ function opsToolDefs(ctx, cfg, wrap, opsState) {
   ]
 }
 
+/** ── 元工具组：computer_do（动态工具面的入口；PLAN-meta-tool 拍板 2026-09-17）── */
+function metaToolDefs(ctx, cfg, wrap, defsRef) {
+  return [
+    {
+      name: 'computer_do',
+      description:
+        '桌面/屏幕操作的统一入口——本工具面默认只暴露它和 screen_observe。'
+        + '任何要在其它窗口里点击、输入、读界面、操作应用的活，先 action="enter" 展开完整桌面工具面'
+        + '（19 个：观察/动作/验证/应用/委派），干完 action="exit" 收起（收起可显著降低工具对注意力的占用，但别频繁进出：切换会让 prompt 前缀缓存失效）。'
+        + 'action="status" 查当前状态。只做一次屏幕观察不必进入，直接 screen_observe。',
+      parameters: {
+        action: {
+          type: 'string',
+          enum: ['enter', 'exit', 'status'],
+          description: 'enter = 展开桌面工具面（默认）；exit = 收起回折叠态；status = 查看当前状态。',
+        },
+      },
+      output: OUT({
+        surface: { type: 'string', description: '当前工具面状态：collapsed（折叠）/ expanded（展开）。' },
+        tools: { type: 'array', items: { type: 'string' }, description: '展开态新增可见的工具名（折叠态为空数组）。' },
+        scope: { type: 'string', description: '本次注册的作用域：agent（会话级）/ global（宿主无作用域注册时的兜底）/ none。' },
+      }),
+      execute: wrap('computer_do', (args, _cfg2, exec) => {
+        const action = args.action || 'enter'
+        if (action === 'enter') {
+          const r = enterSurface(ctx, exec, defsRef())
+          if (!r.ok) {
+            return {
+              ok: false,
+              result: '✗ 当前宿主未提供工具注册能力，无法展开桌面工具面（本插件在无作用域注册的宿主上退化为扁平工具面）。',
+              surface: 'collapsed', tools: [], scope: 'none',
+            }
+          }
+          const already = r.note === 'already-expanded'
+          return {
+            ok: true,
+            result: (already ? '桌面工具面已是展开状态。' : expandedReceipt(r.scope, r.count)) + (r.note && !already ? ` ${r.note}` : ''),
+            surface: 'expanded',
+            tools: [...EXPANDED_ONLY],
+            scope: r.scope,
+          }
+        }
+        if (action === 'exit') {
+          const r = exitSurface(exec)
+          return {
+            ok: true,
+            result: `已收起桌面工具面（注销 ${r.count} 个工具，回到折叠态）。后续桌面操作请重新 action="enter"。`,
+            surface: 'collapsed', tools: [], scope: r.count ? 'none' : 'none',
+          }
+        }
+        const expanded = isExpanded(exec.agent)
+        return {
+          ok: true,
+          result: expanded
+            ? '当前：展开态（19 个桌面工具可见）。干完记得 action="exit" 收起；若你转去做别的（连续 2 次非桌面工具调用）也会自动收起。'
+            : '当前：折叠态（只有 computer_do 与 screen_observe）。要做桌面操作请 action="enter"。',
+          surface: expanded ? 'expanded' : 'collapsed',
+          tools: expanded ? [...EXPANDED_ONLY] : [],
+          scope: expanded ? 'agent' : 'none',
+        }
+      }),
+    },
+  ]
+}
+
 export function apply(ctx, config) {
   dedupReset()   // 每次 apply 视为全新会话状态（降噪缓存随会话走，避免陈旧哈希被复用）
   resetTaskCalls()   // 委派预算按会话重置
@@ -723,16 +777,40 @@ export function apply(ctx, config) {
     }
   }
 
-  // 工具面 = 数据：各组返回定义数组，注册（含参数名登记，供未知参数拒绝）只在下面这一处发生。
-  // 新增工具 = 在对应组的数组里加一项；注册顺序即工具顺序（parity 快照依赖它）。
-  for (const def of [
+  // 工具面 = 数据：各组返回定义数组。注册分两态（PLAN-meta-tool，拍板 2026-09-17）：
+  //   折叠态（默认）= computer_do + screen_observe；展开态 = 另外 19 个按需注册进**本会话自己的作用域**。
+  // 新增工具 = 在对应组数组里加一项 + 加进 lib/surface.js 的清单（有测试守住两处一致）。
+  surfaceReset()
+  // 必须用 defineTool 的**返回值**注册：它会把"作者面 schema"投影成宿主强制子集
+  // （属性级 required:true → object 级 required 数组；隐式开放参数根）。直接注册原始字面量会被
+  // dsh-tools 的 assertSupportedJsonSchema 拒掉——整棵插件树加载失败（2026-09-17 真机探针实测：
+  // P1-7 重构时把这个投影丢了，离线测试的假注册表没有校验所以没发现）。
+  const allDefs = [
     ...observeToolDefs(ctx, cfg, wrap),
     ...actionToolDefs(ctx, cfg, wrap),
     ...opsToolDefs(ctx, cfg, wrap, opsState),
     ...taskToolDefs(ctx, cfg, wrap),
-  ]) ctx.tools.register(defineTool(def))
+    ...metaToolDefs(ctx, cfg, wrap, () => defsByName),
+  ].map((raw) => defineTool(raw))
+  const defsByName = new Map(allDefs.map((d) => [d.name, d]))
+  for (const def of allDefs) {
+    if (ALWAYS_VISIBLE.includes(def.name)) ctx.tools.register(def)
+  }
 
-  ctx.logger?.info('dsh-computer-use: 20 个工具已注册（观察组 screen_observe/zoom · 动作组 computer_click/double/right/type/key/scroll/drag/wait + app_list/launch · 运营组 verify/wait_for/clipboard/menu/hover/stop/resume · 委派组 computer_task）')
+  // 非桌面活动兜底（拍板：连续 2 次非桌面工具调用即回落）：订阅 tools/result——按宿主签名它是
+  // **仅观测**事件："'tools/result'(exec, result): undefined"，监听器异常被容器隔离。
+  // 绝不能用 tools/post-execute：那是 cordis waterfall（signature 末位是 next），不调用 next 返回
+  // undefined 会让注册表读 decision.kind 崩掉——**每一次工具调用都失败**（2026-09-17 真机探针实测踩到）。
+  try {
+    ctx.on?.('tools/result', (exec2) => {
+      try {
+        const name = exec2?.name
+        if (name) noteToolCall(exec2, name)
+      } catch { /* 观测失败不影响主流程 */ }
+    })
+  } catch { /* 宿主无事件总线：仅显式 exit */ }
+
+  ctx.logger?.info('dsh-computer-use: 动态工具面就绪（折叠态 2 个 computer_do/screen_observe；进入后展开 19 个；v0.5.4 的 20 个工具全部保留）')
 }
 
 export default { name, inject, Config, apply }

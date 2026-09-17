@@ -65,14 +65,23 @@ export function makeServices(overrides = {}) {
  */
 export function makeCtx({ services = makeServices(), config = {}, agent = { id: 'test-parent' } } = {}) {
   const reg = new Map()
+  const register = (d) => { reg.set(d.name, d); return () => reg.delete(d.name) }
+  // 会话作用域注册表：模拟宿主的 agent.ctx.tools（动态工具面的展开走这条路径）。
+  // 与全局共同写入同一张 reg，便于测试沿用"按名字取工具"的写法；作用域隔离由不同 makeCtx 实例验证。
+  const scopeReg = new Map()
+  const scopeTools = {
+    register(d) { scopeReg.set(d.name, d); reg.set(d.name, d); return () => { scopeReg.delete(d.name); reg.delete(d.name) } },
+  }
+  if (agent && typeof agent === 'object' && !agent.ctx) agent.ctx = { tools: scopeTools }
   const ctx = {
     get: (n) => services[n],
     logger: { info() {}, error() {} },
-    tools: { register(d) { reg.set(d.name, d); return () => reg.delete(d.name) } },
+    tools: { register },
     toolsRuntime: null,
+    on() { return () => {} },
   }
   const exec = { agent, signal: new AbortController().signal, get signalSet() { return true } }
-  return { reg, ctx, exec }
+  return { reg, scopeReg, ctx, exec }
 }
 
 /** 严格 schema 校验（与 dsh 语义对齐；值先做 JSON 往返，模拟传输后形态）。 */

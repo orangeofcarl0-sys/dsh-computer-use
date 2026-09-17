@@ -117,16 +117,25 @@ const config = {
 plugin.apply(ctx, config)
 
 // 断言工具注册 + 新能力
-// 工具数只做下限 + 关键工具在册（写死数量会在每次加工具时误报）
+// 动态工具面（PLAN-meta-tool）：折叠态只有 computer_do + screen_observe；进入后 20 个工具全部在册。
+const EXPECTED_ALWAYS = ['computer_do', 'screen_observe']
 const REQUIRED_TOOLS = [
   'screen_observe', 'screen_zoom', 'computer_click', 'computer_double_click', 'computer_right_click',
   'computer_type', 'computer_key', 'computer_scroll', 'computer_drag', 'computer_wait',
   'app_list', 'app_launch', 'computer_verify', 'computer_wait_for', 'computer_clipboard',
-  'computer_menu', 'computer_hover', 'computer_stop', 'computer_resume',
+  'computer_menu', 'computer_hover', 'computer_stop', 'computer_resume', 'computer_task',
 ]
+const collapsed = [...registered.keys()].sort()
+check('折叠态工具面 = computer_do + screen_observe', collapsed.join(',') === EXPECTED_ALWAYS.join(','), collapsed.join(', '))
+// 展开（真实宿主：注册进会话作用域；本脚本的 ctx 为最小桩，走全局退化路径）
+const surfaceExec = { agent: { id: 'verify-surface' }, signal: new AbortController().signal, get signalSet() { return true } }
+const enterRes = await registered.get('computer_do').execute({ action: 'enter' }, surfaceExec)
 const missingTools = REQUIRED_TOOLS.filter((t) => !registered.has(t))
-check(`插件注册 ≥${REQUIRED_TOOLS.length} 个工具且关键工具齐备`, registered.size >= REQUIRED_TOOLS.length && missingTools.length === 0,
-  `注册 ${registered.size} 个${missingTools.length ? '，缺: ' + missingTools.join(', ') : ''}`)
+check(`展开后 ${REQUIRED_TOOLS.length + 1} 个工具齐备`, enterRes.ok === true && registered.size >= REQUIRED_TOOLS.length + 1 && missingTools.length === 0,
+  `展开后注册 ${registered.size} 个（scope=${enterRes.scope}）${missingTools.length ? '，缺: ' + missingTools.join(', ') : ''}`)
+const exitRes = await registered.get('computer_do').execute({ action: 'exit' }, surfaceExec)
+check('回落后恢复折叠态', exitRes.ok === true && registered.size === EXPECTED_ALWAYS.length, `注册 ${registered.size} 个`)
+await registered.get('computer_do').execute({ action: 'enter' }, surfaceExec)   // 后续断言需要完整工具面
 const modeProp = registered.get('screen_observe').parameters?.properties?.mode
 check('screen_observe 含 native 模式', registered.has('screen_observe') && modeProp?.enum?.includes('native'), `mode enum: ${modeProp?.enum?.join('/')}`)
 check('screen_zoom 已注册', registered.has('screen_zoom'), '')

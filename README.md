@@ -12,7 +12,7 @@
 
 ## 这是什么
 
-给 [DeepSeek Harness](https://github.com/988hj7tczd-oss/harness-desktop) 加一套可观察、可验证的桌面操作层：20 个模型友好工具，底层通过 [cua-driver](https://github.com/trycua/cua) 驱动本地桌面（独立虚拟光标，不抢真实鼠标）。Windows 深度实测——前台锁、XAML/WinUI 输入、观测几何这些硬墙都在本机踩过并解决。
+给 [DeepSeek Harness](https://github.com/988hj7tczd-oss/harness-desktop) 加一套可观察、可验证的桌面操作层：**折叠态 2 个 / 展开态 21 个**模型友好工具（动态工具面：默认只暴露 `computer_do` 与 `screen_observe`，进入后展开全部），底层通过 [cua-driver](https://github.com/trycua/cua) 驱动本地桌面（独立虚拟光标，不抢真实鼠标）。Windows 深度实测——前台锁、XAML/WinUI 输入、观测几何这些硬墙都在本机踩过并解决。
 
 三个核心机制：
 
@@ -48,7 +48,19 @@
 | 子 agent 委派 | `computer_task`：多步/噪声大的操作交给一次性子 agent（只能用桌面工具、必须以 `{ok,summary,evidence}` 收尾），主上下文只吃一条 ≤400 字符回执 |
 | 上下文成本控制 | 重复观察降噪（未变窗口回极简回执，实测大树 1586→250 字符）、成本阶梯写入工具描述（ax < zoom < native）、紧凑动作回执（`verboseReceipts` 排障时才附明细） |
 
-## 20 个工具
+## 动态工具面（默认只有 2 个可见工具）
+
+20 个工具的 schema 常驻会持续占用模型的注意力（不是 token 成本问题）。所以默认工具面是**折叠态**：
+
+| 状态 | 模型可见 | 何时 |
+|---|---|---|
+| 折叠（默认） | `computer_do` + `screen_observe` | 不做桌面操作时——工具面重量比全量低 **81%** |
+| 展开 | 再加 19 个（动作/验证/应用/委派） | 调 `computer_do({action:'enter'})` 之后；下一请求即可见 |
+
+收起的三种方式：`computer_do({action:'exit'})`、或模型转去做别的（连续 2 次非桌面工具调用自动收起）。
+细粒度工具的 schema、宿主严格输出校验、未知参数拒发、工具级守卫在展开态**全部保留**——切换的只是"何时可见"。
+
+## 工具清单（展开态 21 个 = 折叠态 2 个 + 展开新增 19 个）
 
 | 工具 | 作用 | 主要参数 |
 |---|---|---|
@@ -224,7 +236,7 @@ node evals/verify-oracles.mjs      # S4 评测 oracle 双向验证（setup 必 o
 
 # English (brief)
 
-Personal Computer Use plugin for the DeepSeek Harness: 20 model-friendly tools driving local desktops through [cua-driver](https://github.com/trycua/cua) with an isolated virtual cursor. Windows-deep-tested.
+Personal Computer Use plugin for the DeepSeek Harness: 2 tools by default (dynamic tool surface — `computer_do` + observe), 21 when expanded driving local desktops through [cua-driver](https://github.com/trycua/cua) with an isolated virtual cursor. Windows-deep-tested.
 
 **Stance — zero-friction autonomy**: no approval prompts, no interruptions; capabilities always on (auto desktop-level observation fallback, three-tier delivery escalation that restores the previous foreground). The only hard refusal is automated typing into password fields. `extremePatterns` adds non-blocking warning notes.
 

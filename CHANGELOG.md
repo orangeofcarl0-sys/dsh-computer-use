@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.5 (未发布)
+
+**动态工具面**（PLAN-meta-tool，拍板 2026-09-17）：诉求不是省 token，而是**避免 20 个工具的 schema 常驻造成的注意力负担**。
+
+### Added
+
+- **两态工具面**：折叠态（默认）只暴露 `computer_do` + 精简版 `screen_observe`；`computer_do({action:'enter'})` 后把另外 19 个工具**注册进该会话自己的 agent 作用域**，`exit` 或"连续 2 次非桌面工具调用"自动收起。工具面重量 **18846 → 3532 字符（−81%）**；展开态的 19 个工具与 v0.5.4 完全一致（细粒度 schema、宿主严格输出校验、未知参数拒发、工具级 guard 全部保留）。机制依据与真机取证见 PLAN-meta-tool §6.2：注册表**按请求**投影，所以展开/回落都在下一请求生效（探针逐步实测：折叠→不可调用、enter→下一请求可调用、exit→unknown tool）。
+- `lib/surface.js`（两态状态机 + 作用域注册/dispose + 幂等 + 清单常量）、`tests/surface.mjs`（23 断言：折叠/展开/回落/幂等/作用域隔离/能力兜底/自动回落/清单一致性/注意力预算/锁存/事件接线）。
+- `screen_observe` 描述精简化（534→322 字符，参数说明 510→405）：折叠态常驻工具必须轻；**输出 schema 不动**（宿主严格校验要求实现返回的字段都已声明，砍 schema 就得砍返回值）。
+
+### Fixed
+
+- **注册时丢失 schema 投影（加载失败级回归）**：P1-7 结构重构把 `defineTool()` 的返回值丢了，注册的是未投影的原始字面量 → dsh 0.1.5-rc.2 的 `assertSupportedJsonSchema` 拒绝（属性级 `required:true` 不在强制子集里）→ **整棵插件树加载失败**。离线假注册表不做该校验，171 断言全绿也漏掉了；真机探针一次命中。已修，并记入 HANDOFF 硬知识。
+- **误订阅 waterfall 事件导致所有工具调用失败**：非桌面活动兜底最初挂 `tools/post-execute`（cordis waterfall，末位参数是 `next`），监听器不调 `next` 返回 undefined → 注册表读 `decision.kind` 崩溃 → 每次调用都报 `Cannot read properties of undefined (reading 'kind')`（探针 6/6 步同一报错）。改用仅观测事件 `tools/result`，并在测试里禁止再订阅 waterfall 事件。
+
 ## 0.5.4 (2026-09-17)
 
 **主题**：dsh 0.1.5 大版本适配、点击坐标契约根治（所见即所点）、观察降噪与上下文预算 A–F、S4 评测回归系统、测试与代码结构治理。

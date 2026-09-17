@@ -141,8 +141,9 @@ async function callTool(name, args) {
 }
 
 /** 一套全新会话状态（apply 会重置降噪缓存/委派预算/锁存）+ 覆盖配置。 */
-function freshConfig(overrides = {}) {
+async function freshConfig(overrides = {}) {
   plugin.apply(ctx, { ...defaultsOf(), passwordScan: 'off', ...overrides })   // passwordScan:off 保持测试零 spawn
+  await callTool('computer_do', { action: 'enter' })   // 展开工具面（B 系列要动 19 个工具）
   return {
     call: callTool,
     raw: (o) => String(o?.result || ''),
@@ -154,7 +155,7 @@ const observeArgs = { window: '4242', mode: 'ax' }
 
 // B1 maxElements：观察编号数受 cfg 限制
 {
-  const t = freshConfig({ maxElements: 1 })
+  const t = await freshConfig({ maxElements: 1 })
   const v = await t.call('screen_observe', observeArgs)
   const n = (v.elements || []).length
   const sent = lastStubCall('get_window_state')?.args?.max_elements
@@ -163,12 +164,12 @@ const observeArgs = { window: '4242', mode: 'ax' }
 
 // B2 observeDedup：off 恒全量 / summary 第二次降噪
 {
-  const off = freshConfig({ observeDedup: 'off' })
+  const off = await freshConfig({ observeDedup: 'off' })
   await off.call('screen_observe', observeArgs)
   const second = await off.call('screen_observe', observeArgs)
   check('B2 observeDedup=off 不降噪', !/状态未变/.test(off.raw(second)), `${off.raw(second).length} 字符`)
 
-  const sum = freshConfig({ observeDedup: 'summary' })
+  const sum = await freshConfig({ observeDedup: 'summary' })
   await sum.call('screen_observe', observeArgs)
   const secondSum = await sum.call('screen_observe', observeArgs)
   check('B2 observeDedup=summary 第二次降噪', /状态未变/.test(sum.raw(secondSum)), `${sum.raw(secondSum).length} 字符`)
@@ -176,12 +177,12 @@ const observeArgs = { window: '4242', mode: 'ax' }
 
 // B3 verboseReceipts：只影响回执详略
 {
-  const terse = freshConfig({ verboseReceipts: false })
+  const terse = await freshConfig({ verboseReceipts: false })
   await terse.call('screen_observe', observeArgs)
   const short = await terse.call('computer_click', { x: 5, y: 5 })
   check('B3 verboseReceipts=false 回执不含原始 JSON', !short.result.includes('{"'), short.result.slice(0, 60))
 
-  const loud = freshConfig({ verboseReceipts: true })
+  const loud = await freshConfig({ verboseReceipts: true })
   await loud.call('screen_observe', observeArgs)
   const long = await loud.call('computer_click', { x: 5, y: 5 })
   check('B3 verboseReceipts=true 回执含原始 JSON', long.result.includes('{"'), long.result.slice(0, 60))
@@ -189,13 +190,13 @@ const observeArgs = { window: '4242', mode: 'ax' }
 
 // B4 supersession：enforce 时同快照第二次动作被拒
 {
-  const t = freshConfig({ supersession: 'enforce' })
+  const t = await freshConfig({ supersession: 'enforce' })
   await t.call('screen_observe', observeArgs)
   const first = await t.call('computer_click', { x: 5, y: 5 })
   const second = await t.call('computer_click', { x: 6, y: 6 })
   check('B4 supersession=enforce 第二次动作被拒', first.ok === true && second.ok === false && /snapshot_consumed/.test(second.result), second.result.slice(0, 80))
 
-  const n = freshConfig({ supersession: 'note' })
+  const n = await freshConfig({ supersession: 'note' })
   await n.call('screen_observe', observeArgs)
   const n1 = await n.call('computer_click', { x: 5, y: 5 })
   const n2 = await n.call('computer_click', { x: 6, y: 6 })
@@ -204,7 +205,7 @@ const observeArgs = { window: '4242', mode: 'ax' }
 
 // B5 ttlMs：快照过期后动作被拒
 {
-  const t = freshConfig({ ttlMs: 1 })
+  const t = await freshConfig({ ttlMs: 1 })
   await t.call('screen_observe', observeArgs)
   await new Promise((r) => setTimeout(r, 15))
   const late = await t.call('computer_click', { x: 5, y: 5 })
@@ -213,13 +214,13 @@ const observeArgs = { window: '4242', mode: 'ax' }
 
 // B6 deliveryMode：投递给驱动的 delivery_mode 随之变化
 {
-  const t = freshConfig({ deliveryMode: 'foreground' })
+  const t = await freshConfig({ deliveryMode: 'foreground' })
   await t.call('screen_observe', observeArgs)
   await t.call('computer_click', { x: 5, y: 5 })
   const click = lastStubCall('click')
   check('B6 deliveryMode=foreground 透传驱动', click?.args?.delivery_mode === 'foreground', String(click?.args?.delivery_mode))
 
-  const b = freshConfig({ deliveryMode: 'background' })
+  const b = await freshConfig({ deliveryMode: 'background' })
   await b.call('screen_observe', observeArgs)
   await b.call('computer_click', { x: 5, y: 5 })
   const click2 = lastStubCall('click')
@@ -228,12 +229,12 @@ const observeArgs = { window: '4242', mode: 'ax' }
 
 // B7 allowedApps：白名单不含快照窗口 → 操作被拒
 {
-  const t = freshConfig({ allowedApps: ['Calculator'] })
+  const t = await freshConfig({ allowedApps: ['Calculator'] })
   await t.call('screen_observe', observeArgs)
   const denied = await t.call('computer_click', { x: 5, y: 5 })
   check('B7 allowedApps 非空时白名单外被拒', denied.ok === false && /区域限制/.test(denied.result), denied.result.slice(0, 80))
 
-  const ok = freshConfig({ allowedApps: ['Notepad'] })
+  const ok = await freshConfig({ allowedApps: ['Notepad'] })
   await ok.call('screen_observe', observeArgs)
   const pass = await ok.call('computer_click', { x: 5, y: 5 })
   check('B7 allowedApps 命中白名单放行', pass.ok === true, pass.result.slice(0, 60))
@@ -241,12 +242,12 @@ const observeArgs = { window: '4242', mode: 'ax' }
 
 // B8 extremePatterns：命中极危清单 → 注记（不阻断）
 {
-  const t = freshConfig({ extremePatterns: ['Delete forever'] })
+  const t = await freshConfig({ extremePatterns: ['Delete forever'] })
   await t.call('screen_observe', observeArgs)
   const noted = await t.call('computer_click', { element: 1 })
   check('B8 extremePatterns 命中给极危注记', noted.ok === true && /极危/.test(noted.result), noted.result.slice(0, 90))
 
-  const quiet = freshConfig({ extremePatterns: [] })
+  const quiet = await freshConfig({ extremePatterns: [] })
   await quiet.call('screen_observe', observeArgs)
   const noNote = await quiet.call('computer_click', { element: 1 })
   check('B8 extremePatterns 为空时零注记', !/极危/.test(noNote.result), noNote.result.slice(0, 60))
@@ -254,7 +255,7 @@ const observeArgs = { window: '4242', mode: 'ax' }
 
 // B9 cursorTheme：加载时把主题下发给驱动
 {
-  freshConfig({ cursorTheme: 'sentinel.theme' })
+  await freshConfig({ cursorTheme: 'sentinel.theme' })
   await new Promise((r) => setTimeout(r, 20))   // apply 内的下发行是异步 fire-and-forget
   const theme = lastStubCall('set_agent_cursor_theme')
   check('B9 cursorTheme 下发给驱动', theme?.args?.theme_id === 'sentinel.theme', String(theme?.args?.theme_id))
@@ -274,7 +275,7 @@ const observeArgs = { window: '4242', mode: 'ax' }
       }
     },
   }
-  const t = freshConfig({ maxTaskCalls: 1 })
+  const t = await freshConfig({ maxTaskCalls: 1 })
   ctxServices.subagents = subagents   // 服务面按调用时读取
   const first = await t.call('computer_task', { goal: 'g1' })
   const second = await t.call('computer_task', { goal: 'g2' })
@@ -284,7 +285,7 @@ const observeArgs = { window: '4242', mode: 'ax' }
 
 // B11 visionProvider/visionModel/nativeImage：观察者路由与紧凑图标注
 {
-  const t = freshConfig({ visionProvider: 'sentinel-provider', visionModel: 'sentinel-model', nativeImage: 'compact' })
+  const t = await freshConfig({ visionProvider: 'sentinel-provider', visionModel: 'sentinel-model', nativeImage: 'compact' })
   const v = await t.call('screen_observe', { window: '4242', mode: 'vision' })
   const txt = t.raw(v)
   check('B11 visionProvider/visionModel 决定观察者', txt.includes('sentinel-provider/sentinel-model'), txt.slice(0, 80))
