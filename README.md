@@ -2,7 +2,9 @@
 
 > 我的 DeepSeek Harness 桌面操作插件：**观察 → 编号定位 → 自动升级投递 → 验证**，全程零审批、零打断。
 
-[![License](https://img.shields.io/github/license/orangeofcarl0-sys/dsh-computer-use)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.5.6-blue)]()
+[![dsh](https://img.shields.io/badge/dsh-0.1.5--rc.2-green)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.18.0-339933)](https://nodejs.org/)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#平台支持)
 
