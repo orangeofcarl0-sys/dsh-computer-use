@@ -1,8 +1,9 @@
 # dsh-computer-use 发布清单（PUBLISH）
 
-> 状态更新：2026-09-17 · **v0.5.5 已发布**：`v0.3` 与默认分支 `main` 均指向 `8476a2e`；注解 tag `v0.5.5`。
-> 发布前 check（本版）：`npm run check` / `npm test`（173 断言）/ `verify-runtime.mjs`（16/16）/ `tests/live-action.e2e.mjs`（23/23）/
-> `npm pack --dry-run`（29 文件，无内部文档）；另用 headless 真机探针确认**发布版在 dsh 0.1.5-rc.2 上能加载且折叠态生效**（该探针本轮抓出两个加载级 bug）。
+> 状态更新：2026-09-17 · **v0.5.6 已发布**：`v0.3` 与 `main` 均指向 `789dd51`；注解 tag `v0.5.6`（→ `789dd51`）。
+> 发布前 check：`npm run check` / `npm test`（176 断言）/ `verify-runtime.mjs`（16/16）/ `npm pack --dry-run`（29 文件）/ headless 真机加载探针。
+> **部署现状（用户决定）**：web profile 已**回滚到 v0.5.3**（即本轮改动前的状态），
+> `~/.dsh/profiles/web/node_modules/dsh-computer-use.0.5.5-kept` 保留 0.5.5 副本；要切到新版本：改名该副本为 `dsh-computer-use` 后重启（`restart-dsh-capture.ps1`）。
 > npm 发布与 awesome 收录仍未做，见文末。
 
 ## 发布口径（2026-09-17 确立）
@@ -79,7 +80,7 @@ git ls-remote --tags origin | grep v0.5.4
 | topics | `dsh-plugin` + `deepseek-harness` + `computer-use` + `cua-driver` + `ai-agents` |
 | dsh-plugin topic 收录 | ✅ 已出现在 https://github.com/topics/dsh-plugin |
 | 内部项目书 | ✅ 已从远程移除（`dsh-computer-use.md` 在 .gitignore；⚠️ 首次提交的历史里仍有，介意需 filter-repo 重写） |
-| tag 历史 | v0.4.0 / v0.4.1 / v0.5.0 / v0.5.1 / v0.5.2 / v0.5.3 / v0.5.4 / **v0.5.5**（均为注解 tag；仓库未使用 GitHub Releases 页面，PUBLISH 视其为可选项）|
+| tag 历史 | v0.4.0 / v0.4.1 / v0.5.0 / v0.5.1 / v0.5.2 / v0.5.3 / v0.5.4 / v0.5.5 / **v0.5.6**（均为注解 tag；仓库未使用 GitHub Releases 页面，PUBLISH 视其为可选项）|
 
 ## ⏳ 待做：npm 发布（dsh-market 安装途径）
 
